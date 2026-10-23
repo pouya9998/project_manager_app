@@ -1,0 +1,383 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum EffortStatus {
+  PENDING
+  APPROVED
+  ADJUSTED
+  REJECTED
+}
+
+enum ChatRoomType {
+  DIRECT
+  GROUP
+}
+
+enum ChatMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ChatMessageType {
+  TEXT
+  VOICE
+  FILE
+  IMAGE
+  POLL
+  SYSTEM
+}
+
+enum ChatMentionType {
+  USER
+  TASK
+  PROJECT
+}
+
+enum AppNotificationType {
+  CHAT_MESSAGE
+  TASK_ASSIGNED
+  TASK_MENTION
+  SYSTEM
+  POLL
+}
+
+model AppSettings {
+  id           Int      @id @default(autoincrement())
+  appName      String   @default("سامانه مدیریت پروژه")
+  tagline      String?  @default("مدیریت وظایف، گفتگو و گیت‌لب")
+  logoFile     String?
+  primaryColor String   @default("#0f6e56")
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+}
+
+model JobPosition {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+  users       User[]
+}
+
+model User {
+  id           Int          @id @default(autoincrement())
+  email        String       @unique
+  password     String
+  fullName     String
+  role         Role         @default(USER)
+  jobPosition  JobPosition? @relation(fields: [jobPositionId], references: [id])
+  jobPositionId Int?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  createdTasks    Task[]           @relation("TaskCreator")
+  assignedTasks   TaskAssignee[]
+  effortLogs      EffortLog[]
+  reviewedEfforts EffortLog[]      @relation("EffortReviewer")
+  comments          TaskComment[]
+  mentions          CommentMention[]
+  chatMessages      ChatMessage[]
+  chatRoomsCreated  ChatRoom[]           @relation("ChatRoomCreator")
+  chatMemberships   ChatRoomMember[]
+  chatReceipts      ChatMessageReceipt[]
+  chatPollVotes     ChatPollVote[]
+  notifications     AppNotification[]
+  pushSubscriptions PushSubscription[]
+}
+
+model GitLabConfig {
+  id           Int      @id @default(autoincrement())
+  name         String   @default("پیش‌فرض")
+  baseUrl      String
+  accessToken  String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Project {
+  id              Int      @id @default(autoincrement())
+  name            String
+  description     String?
+  gitlabProjectId Int?
+  gitlabPath      String?
+  gitlabWebUrl    String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tasks           Task[]
+  steps           ProjectStep[]
+}
+
+model ChatRoom {
+  id          Int          @id @default(autoincrement())
+  type        ChatRoomType @default(GROUP)
+  name        String?
+  description String?
+  avatarFile  String?
+  creator     User         @relation("ChatRoomCreator", fields: [creatorId], references: [id])
+  creatorId   Int
+  directKey   String?      @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  members     ChatRoomMember[]
+  messages    ChatMessage[]
+}
+
+model ChatRoomMember {
+  id         Int            @id @default(autoincrement())
+  room       ChatRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId     Int
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     Int
+  role       ChatMemberRole @default(MEMBER)
+  muted      Boolean        @default(false)
+  lastReadAt DateTime?
+  joinedAt   DateTime       @default(now())
+
+  @@unique([roomId, userId])
+}
+
+model ChatMessage {
+  id           Int             @id @default(autoincrement())
+  room         ChatRoom        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId       Int
+  sender       User            @relation(fields: [senderId], references: [id])
+  senderId     Int
+  type         ChatMessageType @default(TEXT)
+  content      String?
+  originalName String?
+  storedName   String?
+  mimeType     String?
+  size         Int?
+  durationSec  Float?
+  replyTo      ChatMessage?    @relation("ChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replyToId    Int?
+  replies      ChatMessage[]   @relation("ChatReplies")
+  createdAt    DateTime        @default(now())
+  editedAt     DateTime?
+  receipts     ChatMessageReceipt[]
+  mentions     ChatMessageMention[]
+  poll         ChatPoll?
+
+  @@index([roomId, createdAt])
+}
+
+model ChatMessageReceipt {
+  id          Int         @id @default(autoincrement())
+  message     ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId   Int
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  deliveredAt DateTime    @default(now())
+  readAt      DateTime?
+
+  @@unique([messageId, userId])
+}
+
+model ChatMessageMention {
+  id         Int             @id @default(autoincrement())
+  message    ChatMessage     @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId  Int
+  type       ChatMentionType
+  refId      Int
+  label      String
+}
+
+model ChatPoll {
+  id             Int              @id @default(autoincrement())
+  message        ChatMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId      Int              @unique
+  question       String
+  multipleChoice Boolean          @default(false)
+  closesAt       DateTime?
+  options        ChatPollOption[]
+}
+
+model ChatPollOption {
+  id     Int           @id @default(autoincrement())
+  poll   ChatPoll      @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  pollId Int
+  text   String
+  order  Int           @default(0)
+  votes  ChatPollVote[]
+}
+
+model ChatPollVote {
+  id       Int            @id @default(autoincrement())
+  option   ChatPollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  optionId Int
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   Int
+  createdAt DateTime      @default(now())
+
+  @@unique([optionId, userId])
+}
+
+model AppNotification {
+  id        Int                  @id @default(autoincrement())
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  type      AppNotificationType
+  title     String
+  body      String
+  link      String?
+  meta      Json?
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model PushSubscription {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}
+
+model ProjectStep {
+  id          Int      @id @default(autoincrement())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   Int
+  title       String
+  color       String   @default("#64748b")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tasks       Task[]
+}
+
+model Task {
+  id          Int        @id @default(autoincrement())
+  title       String
+  description String?
+  status      TaskStatus @default(BACKLOG)
+  priority    Int        @default(2)
+  project     Project?   @relation(fields: [projectId], references: [id])
+  projectId   Int?
+  step        ProjectStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  stepId      Int?
+  creator     User       @relation("TaskCreator", fields: [creatorId], references: [id])
+  creatorId   Int
+  dueDate     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  assignees    TaskAssignee[]
+  attachments  TaskAttachment[]
+  commits      TaskCommit[]
+  mergeRequests TaskMergeRequest[]
+  efforts      EffortLog[]
+  comments     TaskComment[]
+}
+
+model TaskAssignee {
+  id     Int  @id @default(autoincrement())
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  @@unique([taskId, userId])
+}
+
+model TaskAttachment {
+  id           Int      @id @default(autoincrement())
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId       Int
+  originalName String
+  storedName   String
+  mimeType     String?
+  size         Int
+  createdAt    DateTime @default(now())
+}
+
+model TaskCommit {
+  id          Int      @id @default(autoincrement())
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId      Int
+  sha         String
+  title       String
+  webUrl      String?
+  authorName  String?
+  committedAt DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model TaskMergeRequest {
+  id           Int      @id @default(autoincrement())
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId       Int
+  mrIid        Int
+  title        String
+  state        String?
+  webUrl       String?
+  sourceBranch String?
+  targetBranch String?
+  createdAt    DateTime @default(now())
+}
+
+model EffortLog {
+  id             Int          @id @default(autoincrement())
+  task           Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId         Int
+  user           User         @relation(fields: [userId], references: [id])
+  userId         Int
+  hours          Float
+  approvedHours  Float?
+  description    String?
+  status         EffortStatus @default(PENDING)
+  reviewer       User?        @relation("EffortReviewer", fields: [reviewerId], references: [id])
+  reviewerId     Int?
+  reviewNote     String?
+  workDate       DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model TaskComment {
+  id        Int      @id @default(autoincrement())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  content   String
+  createdAt DateTime @default(now())
+  mentions  CommentMention[]
+}
+
+model CommentMention {
+  id        Int         @id @default(autoincrement())
+  comment   TaskComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  commentId Int
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+
+  @@unique([commentId, userId])
+}

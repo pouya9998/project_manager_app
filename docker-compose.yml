@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pmo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pmo
+      POSTGRES_PASSWORD: pmo
+      POSTGRES_DB: pmo
+    volumes:
+      - pmo_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmo -d pmo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: pmo-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://pmo:pmo@db:5432/pmo?schema=public
+      JWT_SECRET: change-me-in-production-pmo-secret
+      PORT: 3001
+    volumes:
+      - pmo_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "3001"
+
+  frontend:
+    build: ./frontend
+    container_name: pmo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3080:80"
+
+volumes:
+  pmo_pg_data:
+  pmo_uploads:

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+uploads/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+.turbo/
+*.tsbuildinfo
+backend/uploads/
+frontend/dev-dist/
+.vscode/
+.idea/
