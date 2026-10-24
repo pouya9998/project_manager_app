@@ -14,7 +14,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
-const senderSelect = { id: true, fullName: true, email: true };
+const senderSelect = { id: true, fullName: true, email: true, avatarFile: true };
 
 const messageInclude = {
   sender: { select: senderSelect },
@@ -453,6 +453,40 @@ export class ChatService {
       where: { id: option.poll.messageId },
       include: messageInclude,
     });
+  }
+
+  async editMessage(messageId: number, userId: number, content: string) {
+    const msg = await this.prisma.chatMessage.findUnique({ where: { id: messageId } });
+    if (!msg) throw new NotFoundException('پیام یافت نشد');
+    if (msg.senderId !== userId) {
+      throw new ForbiddenException('فقط فرستنده می‌تواند پیام را ویرایش کند');
+    }
+    if (msg.type !== ChatMessageType.TEXT) {
+      throw new BadRequestException('فقط پیام متنی قابل ویرایش است');
+    }
+    const text = (content || '').trim();
+    if (!text) throw new BadRequestException('متن پیام خالی است');
+
+    return this.prisma.chatMessage.update({
+      where: { id: messageId },
+      data: { content: text, editedAt: new Date() },
+      include: messageInclude,
+    });
+  }
+
+  async deleteMessage(messageId: number, userId: number) {
+    const msg = await this.prisma.chatMessage.findUnique({ where: { id: messageId } });
+    if (!msg) throw new NotFoundException('پیام یافت نشد');
+    if (msg.senderId !== userId) {
+      throw new ForbiddenException('فقط فرستنده می‌تواند پیام را حذف کند');
+    }
+    if (msg.type === ChatMessageType.SYSTEM) {
+      throw new BadRequestException('این پیام قابل حذف نیست');
+    }
+
+    const roomId = msg.roomId;
+    await this.prisma.chatMessage.delete({ where: { id: messageId } });
+    return { ok: true, id: messageId, roomId };
   }
 
   searchMentions(q: string) {

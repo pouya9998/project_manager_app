@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   UploadedFile,
@@ -157,6 +159,27 @@ export class ChatController {
     const message = await this.chat.vote(id, user.id);
     if (message) this.gateway.emitMessage(message.roomId, message);
     return message;
+  }
+
+  @Patch('messages/:id')
+  async editMessage(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { content?: string },
+  ) {
+    const message = await this.chat.editMessage(id, user.id, body.content || '');
+    this.gateway.emitMessage(message.roomId, message);
+    return message;
+  }
+
+  @Delete('messages/:id')
+  async deleteMessage(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const result = await this.chat.deleteMessage(id, user.id);
+    this.gateway.emitMessageDeleted(result.roomId, result.id);
+    return result;
   }
 
   @Get('mentions/search')

@@ -635,18 +635,353 @@ h2 {
 .chat-composer {
   flex-shrink: 0;
   border-top: 1px solid #e5e7eb;
+  background: #f4f6f8;
+  padding: 0.45rem 0.55rem;
+  padding-bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+}
+
+.tg-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.tg-round-btn {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 0;
+  display: grid;
+  place-items: center;
   background: #fff;
-  padding: 0.5rem;
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  color: #64748b;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.tg-round-btn:active {
+  transform: scale(0.96);
+}
+
+.tg-round-btn.attach.active,
+.tg-round-btn.send {
+  background: var(--brand);
+  color: #fff;
+}
+
+.tg-round-btn.mic {
+  background: #fff;
+  color: #475569;
+}
+
+.tg-round-btn.danger {
+  background: #e11d48;
+  color: #fff;
+}
+
+.tg-input-shell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.15rem;
+  background: #fff;
+  border: 1px solid #e4e8ee;
+  border-radius: 22px;
+  padding: 0.2rem 0.35rem 0.2rem 0.55rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.tg-emoji-trigger {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #94a3b8;
+  display: grid;
+  place-items: center;
+}
+
+.tg-emoji-trigger:hover {
+  color: var(--brand-dark);
+}
+
+.tg-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: #14181f;
+  padding: 0.55rem 0.15rem;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.tg-input::placeholder {
+  color: #94a3b8;
+}
+
+.tg-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  border: 1px solid #e4e8ee;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(15 23 42 / 0.12);
+}
+
+.tg-panel.emoji {
+  inset-inline: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-radius: 16px;
+  padding: 0.45rem;
+}
+
+.tg-emoji-btn {
+  width: 2.15rem;
+  height: 2.15rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 1.15rem;
+  display: grid;
+  place-items: center;
+}
+
+.tg-emoji-btn:hover {
+  background: #f1f5f9;
+}
+
+.tg-panel.attach {
+  inset-inline-end: 0.55rem;
+  width: min(240px, calc(100% - 1.1rem));
+  border-radius: 16px;
+  padding: 0.35rem;
+  display: grid;
+  gap: 2px;
+}
+
+.tg-attach-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 0.55rem 0.65rem;
+  text-align: right;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #14181f;
+}
+
+.tg-attach-item:hover {
+  background: #f1f5f9;
+}
+
+.tg-attach-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+}
+
+.tg-attach-ico.photo {
+  background: #dbeafe;
+}
+
+.tg-attach-ico.file {
+  background: #ede9fe;
+}
+
+.tg-attach-ico.poll {
+  background: #ffedd5;
+}
+
+.tg-panel.mention {
+  inset-inline: 0.55rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 0.45rem;
+}
+
+.tg-mention-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 0.45rem 0.55rem;
+  text-align: right;
+  font-size: 0.875rem;
+}
+
+.tg-mention-item:hover {
+  background: #f1f5f9;
+}
+
+.tg-record-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 42px;
+}
+
+.tg-record-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #be123c;
+  background: #fff1f2;
+  border-radius: 999px;
+  padding: 0.65rem 0.9rem;
+}
+
+.tg-record-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #e11d48;
+  animation: tg-record-blink 1s ease-in-out infinite;
+}
+
+@keyframes tg-record-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .chat-bubble {
-  max-width: min(78%, 420px);
+  max-width: 100%;
   border-radius: 14px;
   padding: 0.55rem 0.75rem;
   font-size: 0.875rem;
   line-height: 1.45;
   box-shadow: 0 1px 0 rgb(0 0 0 / 0.04);
+}
+
+.tg-reply-quote {
+  display: block;
+  width: 100%;
+  text-align: right;
+  border: 0;
+  border-right: 3px solid var(--brand);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.05);
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.35rem;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tg-reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 0.45rem 0.75rem;
+}
+
+.tg-reply-bar-body {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-right: 3px solid var(--brand);
+  background: transparent;
+  padding: 0.15rem 0.55rem;
+  text-align: right;
+}
+
+.tg-reply-bar-close {
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+}
+
+.tg-msg-menu {
+  position: absolute;
+  z-index: 15;
+  top: -0.25rem;
+  display: grid;
+  min-width: 120px;
+  gap: 1px;
+  border: 1px solid #e4e8ee;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 0.14);
+  overflow: hidden;
+}
+
+.tg-msg-menu.mine {
+  inset-inline-start: 0;
+}
+
+.tg-msg-menu.theirs {
+  inset-inline-end: 0;
+}
+
+.tg-msg-menu button {
+  border: 0;
+  background: #fff;
+  padding: 0.55rem 0.8rem;
+  text-align: right;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #14181f;
+}
+
+.tg-msg-menu button:hover {
+  background: #f1f5f9;
+}
+
+.tg-msg-menu button.danger {
+  color: #be123c;
+}
+
+.tg-edit-input {
+  width: 100%;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+  font-size: 0.875rem;
+  resize: vertical;
+  min-height: 56px;
+  background: #fff;
+}
+
+.tg-msg-highlight .chat-bubble {
+  outline: 2px solid rgb(var(--brand-rgb) / 0.45);
+  outline-offset: 2px;
 }
 
 .chat-bubble.mine {

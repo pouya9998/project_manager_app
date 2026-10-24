@@ -4,9 +4,17 @@ import { api, uploadsUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { getChatSocket } from '../lib/socket';
 import ChatImage from '../components/chat/ChatImage';
+import UserAvatar from '../components/chat/UserAvatar';
 import VoicePlayer from '../components/chat/VoicePlayer';
 
 type Mention = { type: 'USER' | 'TASK' | 'PROJECT'; refId: number; label: string };
+
+type ChatUser = {
+  id: number;
+  fullName: string;
+  email?: string;
+  avatarFile?: string | null;
+};
 
 type ChatMessage = {
   id: number;
@@ -18,19 +26,20 @@ type ChatMessage = {
   mimeType?: string | null;
   durationSec?: number | null;
   createdAt: string;
-  sender: { id: number; fullName: string };
+  editedAt?: string | null;
+  sender: ChatUser;
   replyTo?: {
     id: number;
     content?: string | null;
     type: string;
-    sender: { id: number; fullName: string };
+    sender: ChatUser;
   } | null;
   mentions?: Mention[];
   receipts?: {
     userId: number;
     deliveredAt?: string | null;
     readAt?: string | null;
-    user: { id: number; fullName: string };
+    user: ChatUser;
   }[];
   poll?: {
     id: number;
@@ -39,7 +48,7 @@ type ChatMessage = {
     options: {
       id: number;
       text: string;
-      votes: { userId: number; user: { id: number; fullName: string } }[];
+      votes: { userId: number; user: ChatUser }[];
     }[];
   } | null;
 };
@@ -51,9 +60,22 @@ type Room = {
   title: string;
   unread: number;
   lastMessage?: ChatMessage | null;
-  members?: { userId: number; role: string; user: { id: number; fullName: string } }[];
+  members?: { userId: number; role: string; user: ChatUser }[];
   myRole?: string;
 };
+
+function roomPeer(room: Room | null | undefined, myId?: number) {
+  if (!room || room.type !== 'DIRECT' || !myId) return null;
+  return room.members?.find((m) => m.userId !== myId)?.user || null;
+}
+
+function replyPreview(msg: ChatMessage) {
+  if (msg.type === 'VOICE') return '🎤 پیام صوتی';
+  if (msg.type === 'IMAGE') return '🖼 تصویر';
+  if (msg.type === 'FILE') return `📎 ${msg.originalName || 'فایل'}`;
+  if (msg.type === 'POLL') return `📊 ${msg.poll?.question || msg.content || 'نظرسنجی'}`;
+  return msg.content || 'پیام';
+}
 
 const EMOJIS = ['😀', '😂', '😍', '👍', '👎', '❤️', '🔥', '🎉', '🙏', '👌', '😅', '🤔', '✅', '❌', '📌', '🚀'];
 
@@ -154,6 +176,7 @@ export default function ChatPage() {
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
   const [showMention, setShowMention] = useState(false);
   const [mentionQ, setMentionQ] = useState('');
   const [mentionResults, setMentionResults] = useState<{
@@ -173,10 +196,15 @@ export default function ChatPage() {
   const [addMemberIds, setAddMemberIds] = useState<number[]>([]);
   const [recording, setRecording] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(!!activeRoomId);
+  const [menuMsgId, setMenuMsgId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [highlightId, setHighlightId] = useState<number | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const messageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordStartedAt = useRef(0);
@@ -245,7 +273,11 @@ export default function ChatPage() {
 
     const onMessage = (msg: ChatMessage) => {
       if (msg.roomId && msg.roomId !== activeRoomId) return;
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev.map((m) => (m.id === msg.id ? msg : m)) : [...prev, msg]));
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id)
+          ? prev.map((m) => (m.id === msg.id ? msg : m))
+          : [...prev, msg],
+      );
       if (msg.sender?.id !== user?.id) {
         api(`/chat/messages/${msg.id}/delivered`, { method: 'POST', body: {} as any }).catch(() => {});
         api(`/chat/rooms/${activeRoomId}/read`, {
@@ -253,6 +285,15 @@ export default function ChatPage() {
           body: { messageIds: [msg.id] } as any,
         }).catch(() => {});
       }
+      loadRooms().catch(() => {});
+    };
+
+    const onDeleted = (payload: { roomId: number; messageId: number }) => {
+      if (payload.roomId !== activeRoomId) return;
+      setMessages((prev) => prev.filter((m) => m.id !== payload.messageId));
+      setMenuMsgId((id) => (id === payload.messageId ? null : id));
+      setEditingId((id) => (id === payload.messageId ? null : id));
+      setReplyTo((r) => (r?.id === payload.messageId ? null : r));
       loadRooms().catch(() => {});
     };
 
@@ -301,6 +342,7 @@ export default function ChatPage() {
 
     socket.emit('join', { roomId: activeRoomId });
     socket.on('message', onMessage);
+    socket.on('message_deleted', onDeleted);
     socket.on('read', onRead);
     socket.on('receipt', onReceipt);
     socket.on('typing', onTyping);
@@ -308,6 +350,7 @@ export default function ChatPage() {
     return () => {
       socket.emit('leave', { roomId: activeRoomId });
       socket.off('message', onMessage);
+      socket.off('message_deleted', onDeleted);
       socket.off('read', onRead);
       socket.off('receipt', onReceipt);
       socket.off('typing', onTyping);
@@ -514,7 +557,61 @@ export default function ChatPage() {
     }
   }
 
+  function scrollToMessage(id: number) {
+    const el = messageRefs.current[id];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightId(id);
+    window.setTimeout(() => setHighlightId((h) => (h === id ? null : h)), 1400);
+  }
+
+  function startReply(msg: ChatMessage) {
+    setReplyTo(msg);
+    setMenuMsgId(null);
+    setEditingId(null);
+  }
+
+  function startEdit(msg: ChatMessage) {
+    if (msg.type !== 'TEXT' || msg.sender.id !== user?.id) return;
+    setEditingId(msg.id);
+    setEditText(msg.content || '');
+    setMenuMsgId(null);
+    setReplyTo(null);
+  }
+
+  async function saveEdit(messageId: number) {
+    const content = editText.trim();
+    if (!content) return;
+    try {
+      const updated = await api<ChatMessage>(`/chat/messages/${messageId}`, {
+        method: 'PATCH',
+        body: { content } as any,
+      });
+      setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      setEditingId(null);
+      setEditText('');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function removeMessage(msg: ChatMessage) {
+    if (msg.sender.id !== user?.id) return;
+    if (!confirm('این پیام حذف شود؟')) return;
+    setMenuMsgId(null);
+    try {
+      await api(`/chat/messages/${msg.id}`, { method: 'DELETE' });
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      if (replyTo?.id === msg.id) setReplyTo(null);
+      if (editingId === msg.id) setEditingId(null);
+      loadRooms().catch(() => {});
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   const roomTitle = useMemo(() => room?.title || 'گفتگو', [room]);
+  const headerPeer = roomPeer(room, user?.id);
 
   return (
     <div className="chat-shell overflow-hidden">
@@ -535,47 +632,45 @@ export default function ChatPage() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {rooms.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => {
-                navigate(`/chat/${r.id}`);
-                setMobileShowChat(true);
-              }}
-              className={`flex w-full items-start gap-3 border-b border-line/70 px-3 py-3 text-right transition hover:bg-surface-soft ${
-                activeRoomId === r.id ? 'bg-[color:var(--brand-soft)]' : ''
-              }`}
-            >
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[color:var(--brand)] text-sm font-bold text-white">
-                {(r.title || '?').slice(0, 1)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="truncate text-sm font-semibold text-ink">{r.title}</div>
-                  {r.unread > 0 && (
-                    <span className="rounded-full bg-[color:var(--brand)] px-1.5 text-[10px] font-bold text-white">
-                      {r.unread}
-                    </span>
-                  )}
+          {rooms.map((r) => {
+            const peer = roomPeer(r, user?.id);
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => {
+                  navigate(`/chat/${r.id}`);
+                  setMobileShowChat(true);
+                }}
+                className={`flex w-full items-start gap-3 border-b border-line/70 px-3 py-3 text-right transition hover:bg-surface-soft ${
+                  activeRoomId === r.id ? 'bg-[color:var(--brand-soft)]' : ''
+                }`}
+              >
+                <UserAvatar
+                  name={peer?.fullName || r.title}
+                  avatarFile={peer?.avatarFile}
+                  size={44}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-sm font-semibold text-ink">{r.title}</div>
+                    {r.unread > 0 && (
+                      <span className="rounded-full bg-[color:var(--brand)] px-1.5 text-[10px] font-bold text-white">
+                        {r.unread}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-ink-mute">
+                    {r.lastMessage
+                      ? replyPreview(r.lastMessage)
+                      : r.type === 'DIRECT'
+                        ? 'شروع گفتگو'
+                        : 'گروه'}
+                  </div>
                 </div>
-                <div className="mt-0.5 truncate text-xs text-ink-mute">
-                  {r.lastMessage?.content ||
-                    (r.lastMessage?.type === 'VOICE'
-                      ? 'پیام صوتی'
-                      : r.lastMessage?.type === 'POLL'
-                        ? 'نظرسنجی'
-                        : r.lastMessage?.type === 'IMAGE'
-                          ? 'تصویر'
-                          : r.lastMessage?.type === 'FILE'
-                            ? 'فایل'
-                            : r.type === 'DIRECT'
-                              ? 'شروع گفتگو'
-                              : 'گروه')}
-                </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
           {!rooms.length && (
             <div className="p-6 text-center text-sm text-ink-mute">هنوز گفتگویی ندارید</div>
           )}
@@ -599,6 +694,11 @@ export default function ChatPage() {
                 >
                   بازگشت
                 </button>
+                <UserAvatar
+                  name={headerPeer?.fullName || roomTitle}
+                  avatarFile={headerPeer?.avatarFile}
+                  size={40}
+                />
                 <div className="min-w-0">
                   <div className="truncate font-bold text-ink">{roomTitle}</div>
                   <div className="truncate text-[11px] text-ink-mute">
@@ -617,8 +717,11 @@ export default function ChatPage() {
               )}
             </header>
 
-            <div className="chat-messages flex-1 overflow-y-auto px-3 py-4">
-              {messages.map((msg) => {
+            <div
+              className="chat-messages flex-1 overflow-y-auto px-3 py-4"
+              onClick={() => setMenuMsgId(null)}
+            >
+              {messages.map((msg, idx) => {
                 const mine = msg.sender.id === user?.id;
                 if (msg.type === 'SYSTEM') {
                   return (
@@ -630,120 +733,219 @@ export default function ChatPage() {
                 const isMedia = msg.type === 'IMAGE' || msg.type === 'VOICE';
                 const isImageFile =
                   msg.type === 'FILE' && !!msg.mimeType?.startsWith('image/') && !!msg.storedName;
+                const prev = messages[idx - 1];
+                const showAvatar =
+                  !mine &&
+                  (!prev ||
+                    prev.type === 'SYSTEM' ||
+                    prev.sender.id !== msg.sender.id);
+                const showName = !mine && room?.type === 'GROUP' && showAvatar;
+                const isEditing = editingId === msg.id;
+
                 return (
-                  <div key={msg.id} className={`mb-2 flex ${mine ? 'justify-start' : 'justify-end'}`}>
-                    <div
-                      className={`chat-bubble ${mine ? 'mine' : 'theirs'} ${
-                        isMedia || isImageFile ? 'media' : ''
-                      } ${msg.type === 'IMAGE' || isImageFile ? 'image' : ''} ${
-                        msg.type === 'VOICE' ? 'voice' : ''
-                      }`}
-                    >
-                      {!mine && room?.type === 'GROUP' && (
-                        <div className="mb-1 px-1 text-[11px] font-semibold text-[color:var(--brand-dark)]">
-                          {msg.sender.fullName}
-                        </div>
-                      )}
-                      {msg.replyTo && (
-                        <div className="mb-1 rounded-md border-r-2 border-[color:var(--brand)] bg-black/5 px-2 py-1 text-[11px]">
-                          <div className="font-semibold">{msg.replyTo.sender.fullName}</div>
-                          <div className="truncate opacity-80">
-                            {msg.replyTo.content || msg.replyTo.type}
+                  <div
+                    key={msg.id}
+                    ref={(el) => {
+                      messageRefs.current[msg.id] = el;
+                    }}
+                    className={`mb-1.5 flex items-end gap-1.5 ${
+                      mine ? 'justify-start' : 'justify-end'
+                    } ${highlightId === msg.id ? 'tg-msg-highlight' : ''}`}
+                  >
+                    {mine && <div className="w-8 shrink-0" />}
+                    <div className="relative max-w-[min(82%,440px)]">
+                      <div
+                        className={`chat-bubble ${mine ? 'mine' : 'theirs'} ${
+                          isMedia || isImageFile ? 'media' : ''
+                        } ${msg.type === 'IMAGE' || isImageFile ? 'image' : ''} ${
+                          msg.type === 'VOICE' ? 'voice' : ''
+                        }`}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setMenuMsgId(msg.id);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {showName && (
+                          <div className="mb-1 px-1 text-[11px] font-semibold text-[color:var(--brand-dark)]">
+                            {msg.sender.fullName}
                           </div>
-                        </div>
-                      )}
-                      {msg.type === 'TEXT' && renderContent(msg)}
-                      {(msg.type === 'IMAGE' || isImageFile) && msg.storedName && (
-                        <div className="tg-image-wrap">
-                          <ChatImage
-                            src={uploadsUrl(msg.storedName)}
-                            alt={msg.originalName || 'تصویر'}
-                            caption={msg.type === 'IMAGE' ? msg.content : null}
-                          />
-                          {!msg.content && (
-                            <div className="tg-image-stamp">
+                        )}
+                        {msg.replyTo && (
+                          <button
+                            type="button"
+                            className="tg-reply-quote"
+                            onClick={() => scrollToMessage(msg.replyTo!.id)}
+                          >
+                            <div className="font-semibold">{msg.replyTo.sender.fullName}</div>
+                            <div className="truncate opacity-80">
+                              {msg.replyTo.content ||
+                                (msg.replyTo.type === 'VOICE'
+                                  ? '🎤 پیام صوتی'
+                                  : msg.replyTo.type === 'IMAGE'
+                                    ? '🖼 تصویر'
+                                    : msg.replyTo.type)}
+                            </div>
+                          </button>
+                        )}
+
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <textarea
+                              className="tg-edit-input"
+                              rows={2}
+                              value={editText}
+                              autoFocus
+                              onChange={(e) => setEditText(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                className="btn-primary !px-2 !py-1 text-xs"
+                                onClick={() => saveEdit(msg.id)}
+                              >
+                                ذخیره
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost !px-2 !py-1 text-xs"
+                                onClick={() => {
+                                  setEditingId(null);
+                                  setEditText('');
+                                }}
+                              >
+                                لغو
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {msg.type === 'TEXT' && renderContent(msg)}
+                            {(msg.type === 'IMAGE' || isImageFile) && msg.storedName && (
+                              <div className="tg-image-wrap">
+                                <ChatImage
+                                  src={uploadsUrl(msg.storedName)}
+                                  alt={msg.originalName || 'تصویر'}
+                                  caption={msg.type === 'IMAGE' ? msg.content : null}
+                                />
+                                {!msg.content && (
+                                  <div className="tg-image-stamp">
+                                    {msg.editedAt && <span className="opacity-80">ویرایش‌شده · </span>}
+                                    <span>{formatTime(msg.createdAt)}</span>
+                                    <Tick mine={mine} message={msg} />
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {msg.type === 'FILE' && !isImageFile && msg.storedName && (
+                              <a
+                                className="text-sm font-semibold underline"
+                                href={uploadsUrl(msg.storedName)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                📎 {msg.originalName || 'فایل'}
+                              </a>
+                            )}
+                            {msg.type === 'VOICE' && msg.storedName && (
+                              <VoicePlayer
+                                src={uploadsUrl(msg.storedName)}
+                                durationSec={msg.durationSec}
+                                mine={mine}
+                                messageId={msg.id}
+                              />
+                            )}
+                            {msg.type === 'POLL' && msg.poll && (
+                              <div className="min-w-[200px] space-y-2">
+                                <div className="font-semibold">📊 {msg.poll.question}</div>
+                                {msg.poll.options.map((opt) => {
+                                  const total =
+                                    msg.poll!.options.reduce((s, o) => s + o.votes.length, 0) || 1;
+                                  const pct = Math.round((opt.votes.length / total) * 100);
+                                  const voted = opt.votes.some((v) => v.userId === user?.id);
+                                  return (
+                                    <button
+                                      key={opt.id}
+                                      type="button"
+                                      onClick={() => vote(opt.id)}
+                                      className={`relative w-full overflow-hidden rounded-lg border px-2 py-1.5 text-right text-sm ${
+                                        voted
+                                          ? 'border-[color:var(--brand)] bg-[color:var(--brand-soft)]'
+                                          : 'border-line bg-white/60'
+                                      }`}
+                                    >
+                                      <span
+                                        className="absolute inset-y-0 right-0 bg-[color:var(--brand)]/15"
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                      <span className="relative flex justify-between gap-2">
+                                        <span>{opt.text}</span>
+                                        <span className="text-xs text-ink-mute">
+                                          {opt.votes.length} · {pct}%
+                                        </span>
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {!isEditing && (!(msg.type === 'IMAGE' || isImageFile) || msg.content) && (
+                          <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
+                            <button
+                              type="button"
+                              className="text-[10px] text-ink-faint hover:text-ink"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMenuMsgId((id) => (id === msg.id ? null : msg.id));
+                              }}
+                            >
+                              ⋯
+                            </button>
+                            <div className="flex items-center gap-1 text-[10px] text-ink-faint">
+                              {msg.editedAt && <span>ویرایش‌شده</span>}
                               <span>{formatTime(msg.createdAt)}</span>
                               <Tick mine={mine} message={msg} />
                             </div>
+                          </div>
+                        )}
+                        <SeenBy mine={mine} message={msg} />
+                      </div>
+
+                      {menuMsgId === msg.id && (
+                        <div
+                          className={`tg-msg-menu ${mine ? 'mine' : 'theirs'}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button type="button" onClick={() => startReply(msg)}>
+                            پاسخ
+                          </button>
+                          {mine && msg.type === 'TEXT' && (
+                            <button type="button" onClick={() => startEdit(msg)}>
+                              ویرایش
+                            </button>
+                          )}
+                          {mine && (
+                            <button type="button" className="danger" onClick={() => removeMessage(msg)}>
+                              حذف
+                            </button>
                           )}
                         </div>
                       )}
-                      {msg.type === 'FILE' && !isImageFile && msg.storedName && (
-                        <a
-                          className="text-sm font-semibold underline"
-                          href={uploadsUrl(msg.storedName)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          📎 {msg.originalName || 'فایل'}
-                        </a>
-                      )}
-                      {msg.type === 'VOICE' && msg.storedName && (
-                        <VoicePlayer
-                          src={uploadsUrl(msg.storedName)}
-                          durationSec={msg.durationSec}
-                          mine={mine}
-                          messageId={msg.id}
-                        />
-                      )}
-                      {msg.type === 'POLL' && msg.poll && (
-                        <div className="min-w-[200px] space-y-2">
-                          <div className="font-semibold">📊 {msg.poll.question}</div>
-                          {msg.poll.options.map((opt) => {
-                            const total = msg.poll!.options.reduce((s, o) => s + o.votes.length, 0) || 1;
-                            const pct = Math.round((opt.votes.length / total) * 100);
-                            const voted = opt.votes.some((v) => v.userId === user?.id);
-                            return (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                onClick={() => vote(opt.id)}
-                                className={`relative w-full overflow-hidden rounded-lg border px-2 py-1.5 text-right text-sm ${
-                                  voted
-                                    ? 'border-[color:var(--brand)] bg-[color:var(--brand-soft)]'
-                                    : 'border-line bg-white/60'
-                                }`}
-                              >
-                                <span
-                                  className="absolute inset-y-0 right-0 bg-[color:var(--brand)]/15"
-                                  style={{ width: `${pct}%` }}
-                                />
-                                <span className="relative flex justify-between gap-2">
-                                  <span>{opt.text}</span>
-                                  <span className="text-xs text-ink-mute">
-                                    {opt.votes.length} · {pct}%
-                                  </span>
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {!(msg.type === 'IMAGE' || isImageFile) || msg.content ? (
-                        <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
-                          <button
-                            type="button"
-                            className="text-[10px] text-ink-faint hover:text-ink"
-                            onClick={() => setReplyTo(msg)}
-                          >
-                            پاسخ
-                          </button>
-                          <div className="flex items-center gap-1 text-[10px] text-ink-faint">
-                            <span>{formatTime(msg.createdAt)}</span>
-                            <Tick mine={mine} message={msg} />
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="mt-1 px-1 text-[10px] text-ink-faint hover:text-ink"
-                          onClick={() => setReplyTo(msg)}
-                        >
-                          پاسخ
-                        </button>
-                      )}
-                      <SeenBy mine={mine} message={msg} />
                     </div>
+                    {!mine ? (
+                      showAvatar ? (
+                        <UserAvatar
+                          name={msg.sender.fullName}
+                          avatarFile={msg.sender.avatarFile}
+                          size={32}
+                        />
+                      ) : (
+                        <div className="w-8 shrink-0" />
+                      )
+                    ) : null}
                   </div>
                 );
               })}
@@ -751,11 +953,18 @@ export default function ChatPage() {
             </div>
 
             {replyTo && (
-              <div className="flex items-center justify-between border-t border-line bg-surface-soft px-3 py-1.5 text-xs">
-                <div>
-                  پاسخ به <b>{replyTo.sender.fullName}</b>: {replyTo.content || replyTo.type}
-                </div>
-                <button type="button" onClick={() => setReplyTo(null)}>
+              <div className="tg-reply-bar">
+                <button
+                  type="button"
+                  className="tg-reply-bar-body"
+                  onClick={() => scrollToMessage(replyTo.id)}
+                >
+                  <div className="text-[11px] font-bold text-[color:var(--brand-dark)]">
+                    پاسخ به {replyTo.sender.fullName}
+                  </div>
+                  <div className="truncate text-xs text-ink-mute">{replyPreview(replyTo)}</div>
+                </button>
+                <button type="button" className="tg-reply-bar-close" onClick={() => setReplyTo(null)}>
                   ✕
                 </button>
               </div>
@@ -764,14 +973,41 @@ export default function ChatPage() {
             {error && <div className="bg-rose-50 px-3 py-1 text-xs text-rose-700">{error}</div>}
 
             <div className="chat-composer relative">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadFile(f);
+                  e.target.value = '';
+                  setShowAttach(false);
+                }}
+              />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadFile(f, 'IMAGE');
+                  e.target.value = '';
+                  setShowAttach(false);
+                }}
+              />
+
               {showEmoji && (
-                <div className="absolute bottom-full mb-1 flex flex-wrap gap-1 rounded-xl border border-line bg-surface p-2 shadow-card">
+                <div className="tg-panel emoji">
                   {EMOJIS.map((e) => (
                     <button
                       key={e}
                       type="button"
-                      className="grid h-8 w-8 place-items-center rounded-lg hover:bg-surface-soft"
-                      onClick={() => setText((t) => t + e)}
+                      className="tg-emoji-btn"
+                      onClick={() => {
+                        setText((t) => t + e);
+                      }}
                     >
                       {e}
                     </button>
@@ -779,14 +1015,53 @@ export default function ChatPage() {
                 </div>
               )}
 
+              {showAttach && (
+                <div className="tg-panel attach">
+                  <button
+                    type="button"
+                    className="tg-attach-item"
+                    onClick={() => {
+                      setShowAttach(false);
+                      imageInputRef.current?.click();
+                    }}
+                  >
+                    <span className="tg-attach-ico photo">🖼</span>
+                    <span>تصویر / گالری</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="tg-attach-item"
+                    onClick={() => {
+                      setShowAttach(false);
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <span className="tg-attach-ico file">📎</span>
+                    <span>فایل</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="tg-attach-item"
+                    onClick={() => {
+                      setShowAttach(false);
+                      setShowPoll(true);
+                      setShowEmoji(false);
+                    }}
+                  >
+                    <span className="tg-attach-ico poll">📊</span>
+                    <span>نظرسنجی</span>
+                  </button>
+                </div>
+              )}
+
               {showMention && (
-                <div className="absolute bottom-full mb-1 max-h-48 w-72 overflow-y-auto rounded-xl border border-line bg-surface p-2 shadow-card">
-                  <div className="mb-1 text-[11px] font-semibold text-ink-mute">منشن</div>
+                <div className="tg-panel mention">
+                  <div className="mb-1 px-1 text-[11px] font-semibold text-ink-mute">منشن</div>
                   {mentionResults.users.map((u) => (
                     <button
                       key={`u-${u.id}`}
                       type="button"
-                      className="block w-full rounded-lg px-2 py-1.5 text-right text-sm hover:bg-surface-soft"
+                      className="tg-mention-item"
                       onClick={() =>
                         insertMention(
                           { type: 'USER', refId: u.id, label: u.fullName },
@@ -801,7 +1076,7 @@ export default function ChatPage() {
                     <button
                       key={`t-${t.id}`}
                       type="button"
-                      className="block w-full rounded-lg px-2 py-1.5 text-right text-sm hover:bg-surface-soft"
+                      className="tg-mention-item"
                       onClick={() =>
                         insertMention({ type: 'TASK', refId: t.id, label: t.title }, t.title)
                       }
@@ -813,7 +1088,7 @@ export default function ChatPage() {
                     <button
                       key={`p-${p.id}`}
                       type="button"
-                      className="block w-full rounded-lg px-2 py-1.5 text-right text-sm hover:bg-surface-soft"
+                      className="tg-mention-item"
                       onClick={() =>
                         insertMention({ type: 'PROJECT', refId: p.id, label: p.name }, p.name)
                       }
@@ -825,7 +1100,7 @@ export default function ChatPage() {
               )}
 
               {showPoll && (
-                <div className="mb-2 space-y-2 rounded-xl border border-line bg-surface-soft p-3">
+                <div className="mb-2 space-y-2 rounded-2xl border border-line bg-surface-soft p-3">
                   <input
                     className="input"
                     placeholder="سوال نظرسنجی"
@@ -843,7 +1118,7 @@ export default function ChatPage() {
                       }
                     />
                   ))}
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       className="btn-ghost text-xs"
@@ -861,68 +1136,136 @@ export default function ChatPage() {
                 </div>
               )}
 
-              <form onSubmit={sendText} className="flex items-end gap-1.5">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) uploadFile(f);
-                    e.target.value = '';
+              {recording ? (
+                <div className="tg-record-bar">
+                  <button
+                    type="button"
+                    className="tg-round-btn danger"
+                    onClick={() => stopRecording()}
+                    aria-label="توقف ضبط"
+                  >
+                    ■
+                  </button>
+                  <div className="tg-record-label">
+                    <span className="tg-record-dot" />
+                    در حال ضبط صدا... روی توقف بزنید
+                  </div>
+                </div>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    setShowEmoji(false);
+                    setShowAttach(false);
+                    return sendText(e);
                   }}
-                />
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) uploadFile(f, 'IMAGE');
-                    e.target.value = '';
-                  }}
-                />
-                <button type="button" className="btn-ghost !px-2" onClick={() => setShowEmoji((v) => !v)}>
-                  😊
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost !px-2"
-                  title="ارسال تصویر"
-                  onClick={() => imageInputRef.current?.click()}
+                  className="tg-composer-row"
                 >
-                  🖼
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost !px-2"
-                  title="ارسال فایل"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  📎
-                </button>
-                <button type="button" className="btn-ghost !px-2" onClick={() => setShowPoll((v) => !v)}>
-                  📊
-                </button>
-                <button
-                  type="button"
-                  className={`btn-ghost !px-2 ${recording ? '!bg-rose-100 text-rose-700' : ''}`}
-                  onClick={() => (recording ? stopRecording() : startRecording())}
-                >
-                  {recording ? '⏹' : '🎤'}
-                </button>
-                <input
-                  className="input flex-1"
-                  placeholder="پیام بنویسید... (@ برای منشن)"
-                  value={text}
-                  onChange={(e) => onTextChange(e.target.value)}
-                />
-                <button type="submit" className="btn-primary !px-3" disabled={busy || !text.trim()}>
-                  ارسال
-                </button>
-              </form>
+                  <button
+                    type="button"
+                    className={`tg-round-btn attach ${showAttach ? 'active' : ''}`}
+                    aria-label="پیوست"
+                    onClick={() => {
+                      setShowAttach((v) => !v);
+                      setShowEmoji(false);
+                    }}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M12 5v14M5 12h14"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+
+                  <div className="tg-input-shell">
+                    <button
+                      type="button"
+                      className="tg-emoji-trigger"
+                      aria-label="ایموجی"
+                      onClick={() => {
+                        setShowEmoji((v) => !v);
+                        setShowAttach(false);
+                      }}
+                    >
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+                        <circle cx="9" cy="10" r="1.1" fill="currentColor" />
+                        <circle cx="15" cy="10" r="1.1" fill="currentColor" />
+                        <path
+                          d="M8.5 14.5c1.2 1.4 2.6 2 3.5 2s2.3-.6 3.5-2"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                    <textarea
+                      className="tg-input"
+                      rows={1}
+                      placeholder="پیام بنویسید..."
+                      value={text}
+                      onChange={(e) => {
+                        onTextChange(e.target.value);
+                        const el = e.target;
+                        el.style.height = 'auto';
+                        el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (text.trim() && !busy) {
+                            (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {text.trim() ? (
+                    <button
+                      type="submit"
+                      className="tg-round-btn send"
+                      disabled={busy}
+                      aria-label="ارسال"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                        <path d="M3.4 20.6 21 12 3.4 3.4l-.1 6.7L15 12 3.3 13.9l.1 6.7Z" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="tg-round-btn mic"
+                      aria-label="پیام صوتی"
+                      onClick={() => {
+                        setShowAttach(false);
+                        setShowEmoji(false);
+                        startRecording();
+                      }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <rect
+                          x="9"
+                          y="3.5"
+                          width="6"
+                          height="11"
+                          rx="3"
+                          stroke="currentColor"
+                          strokeWidth="1.9"
+                        />
+                        <path
+                          d="M6.5 11a5.5 5.5 0 0 0 11 0M12 16.5V20"
+                          stroke="currentColor"
+                          strokeWidth="1.9"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </form>
+              )}
             </div>
           </>
         )}
@@ -1002,9 +1345,12 @@ export default function ChatPage() {
             </div>
             <div className="mb-3 space-y-1">
               {room.members?.map((m) => (
-                <div key={m.userId} className="flex justify-between text-sm">
-                  <span>{m.user.fullName}</span>
-                  <span className="text-xs text-ink-mute">{m.role}</span>
+                <div key={m.userId} className="flex items-center justify-between gap-2 text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <UserAvatar name={m.user.fullName} avatarFile={m.user.avatarFile} size={32} />
+                    <span className="truncate">{m.user.fullName}</span>
+                  </div>
+                  <span className="shrink-0 text-xs text-ink-mute">{m.role}</span>
                 </div>
               ))}
             </div>

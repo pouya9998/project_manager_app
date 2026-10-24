@@ -82,6 +82,10 @@ export class ChatGateway implements OnGatewayConnection {
     this.server?.to(`room:${roomId}`).emit('message', message);
   }
 
+  emitMessageDeleted(roomId: number, messageId: number) {
+    this.server?.to(`room:${roomId}`).emit('message_deleted', { roomId, messageId });
+  }
+
   emitRead(roomId: number, payload: any) {
     this.server?.to(`room:${roomId}`).emit('read', payload);
   }
