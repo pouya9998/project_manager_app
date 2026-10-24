@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, uploadsUrl } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { roleLabel } from '../lib/labels';
 
 const emptyForm = {
@@ -8,16 +9,17 @@ const emptyForm = {
   password: '',
   role: 'USER',
   jobPositionId: '',
-  isActive: true,
 };
 
 export default function UsersPage() {
+  const { user: me } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [form, setForm] = useState({ ...emptyForm });
   const [editId, setEditId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   async function load() {
     const [u, p] = await Promise.all([api('/users'), api('/positions')]);
@@ -37,7 +39,6 @@ export default function UsersPage() {
       password: '',
       role: u.role,
       jobPositionId: u.jobPositionId ? String(u.jobPositionId) : '',
-      isActive: u.isActive,
     });
     setError('');
     setMsg('');
@@ -58,7 +59,6 @@ export default function UsersPage() {
         email: form.email,
         role: form.role,
         jobPositionId: form.jobPositionId ? Number(form.jobPositionId) : null,
-        isActive: form.isActive,
       };
       if (form.password) body.password = form.password;
 
@@ -84,10 +84,31 @@ export default function UsersPage() {
     }
   }
 
-  async function deactivate(id: number) {
-    if (!confirm('غیرفعال کردن این کاربر؟')) return;
-    await api(`/users/${id}`, { method: 'DELETE' });
-    await load();
+  async function removeUser(u: any) {
+    if (u.id === me?.id) {
+      setError('نمی‌توانید حساب خودتان را حذف کنید');
+      return;
+    }
+    if (
+      !confirm(
+        `حذف دائمی کاربر «${u.fullName}»؟\nاین عمل قابل بازگشت نیست و زمان‌ها و نظرات این کاربر پاک می‌شود.`,
+      )
+    ) {
+      return;
+    }
+    setError('');
+    setMsg('');
+    setBusyId(u.id);
+    try {
+      await api(`/users/${u.id}`, { method: 'DELETE' });
+      if (editId === u.id) cancelEdit();
+      setMsg(`کاربر «${u.fullName}» حذف شد`);
+      await load();
+    } catch (err: any) {
+      setError(err.message || 'حذف کاربر ناموفق بود');
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
@@ -157,19 +178,6 @@ export default function UsersPage() {
             ))}
           </select>
         </div>
-        {editId && (
-          <div>
-            <label className="label">وضعیت حساب</label>
-            <select
-              className="input"
-              value={form.isActive ? '1' : '0'}
-              onChange={(e) => setForm({ ...form, isActive: e.target.value === '1' })}
-            >
-              <option value="1">فعال</option>
-              <option value="0">غیرفعال</option>
-            </select>
-          </div>
-        )}
         {error && (
           <div className="md:col-span-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
         )}
@@ -196,7 +204,6 @@ export default function UsersPage() {
               <th className="px-4 py-3 text-right font-medium">ایمیل</th>
               <th className="px-4 py-3 text-right font-medium">نقش</th>
               <th className="px-4 py-3 text-right font-medium">سمت</th>
-              <th className="px-4 py-3 text-right font-medium">وضعیت</th>
               <th className="px-4 py-3 text-right font-medium">اقدام</th>
             </tr>
           </thead>
@@ -229,19 +236,19 @@ export default function UsersPage() {
                 <td className="px-4 py-3">{u.email}</td>
                 <td className="px-4 py-3">{roleLabel[u.role]}</td>
                 <td className="px-4 py-3">{u.jobPosition?.title || '—'}</td>
-                <td className="px-4 py-3">{u.isActive ? 'فعال' : 'غیرفعال'}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     <button type="button" className="btn-ghost py-1 text-xs" onClick={() => startEdit(u)}>
                       ویرایش
                     </button>
-                    {u.isActive && (
+                    {u.id !== me?.id && (
                       <button
                         type="button"
                         className="btn-danger py-1 text-xs"
-                        onClick={() => deactivate(u.id)}
+                        disabled={busyId === u.id}
+                        onClick={() => removeUser(u)}
                       >
-                        غیرفعال
+                        {busyId === u.id ? '...' : 'حذف'}
                       </button>
                     )}
                   </div>
