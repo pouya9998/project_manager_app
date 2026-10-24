@@ -11,6 +11,7 @@ type Meeting = {
   id: number;
   title: string;
   description?: string | null;
+  meetingUrl?: string | null;
   type: 'INSTANT' | 'SCHEDULED' | 'RECURRING';
   status: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED';
   recurrence: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
@@ -20,22 +21,8 @@ type Meeting = {
   host: UserLite;
   invitees?: { userId: number; role: string; user: UserLite }[];
   project?: { id: number; name: string } | null;
-  liveParticipants?: number;
   startedAt?: string | null;
   endedAt?: string | null;
-};
-
-type Stats = {
-  participants: {
-    user: UserLite;
-    joinedAt: string;
-    leftAt: string | null;
-    durationSec: number;
-    sessions: number;
-  }[];
-  totalDurationSec: number;
-  avgDurationSec: number;
-  uniqueParticipants: number;
 };
 
 const statusLabel: Record<string, string> = {
@@ -44,10 +31,6 @@ const statusLabel: Record<string, string> = {
   ENDED: 'پایان‌یافته',
   CANCELLED: 'لغو شده',
 };
-
-function openMeetingRoom(meetingId: number) {
-  window.open(`/meetings/${meetingId}/room`, '_blank', 'noopener,noreferrer');
-}
 
 const recurrenceLabel: Record<string, string> = {
   NONE: 'بدون تکرار',
@@ -63,13 +46,9 @@ function statusChip(status: string) {
   return 'bg-rose-500/15 text-rose-700 dark:text-rose-300';
 }
 
-function formatDuration(sec: number) {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) return `${h}س ${m}د`;
-  if (m > 0) return `${m}د ${s}ث`;
-  return `${s}ث`;
+function openExternalMeeting(url?: string | null) {
+  if (!url) return;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 function toLocalInputValue(iso?: string) {
@@ -94,7 +73,6 @@ export default function MeetingsPage() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [detail, setDetail] = useState<Meeting | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [error, setError] = useState('');
@@ -103,6 +81,7 @@ export default function MeetingsPage() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [meetingUrl, setMeetingUrl] = useState('');
   const [startsAt, setStartsAt] = useState(() => toLocalInputValue(new Date().toISOString()));
   const [endsAt, setEndsAt] = useState(() =>
     toLocalInputValue(new Date(Date.now() + 3600000).toISOString()),
@@ -112,10 +91,14 @@ export default function MeetingsPage() {
   const [projectId, setProjectId] = useState<number | ''>('');
   const [startNow, setStartNow] = useState(wantInstant);
 
+  const [editUrl, setEditUrl] = useState('');
+
   async function loadCalendar() {
     const from = new Date(Date.now() - 14 * 86400000).toISOString();
     const to = new Date(Date.now() + 90 * 86400000).toISOString();
-    const list = await api<Meeting[]>(`/meetings/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const list = await api<Meeting[]>(
+      `/meetings/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
     setMeetings(list);
   }
 
@@ -136,7 +119,6 @@ export default function MeetingsPage() {
   useEffect(() => {
     if (!id) {
       setDetail(null);
-      setStats(null);
       return;
     }
     let cancelled = false;
@@ -145,12 +127,7 @@ export default function MeetingsPage() {
         const m = await api<Meeting>(`/meetings/${id}`);
         if (cancelled) return;
         setDetail(m);
-        if (m.status === 'ENDED' || m.status === 'LIVE') {
-          const s = await api<Stats>(`/meetings/${id}/stats`);
-          if (!cancelled) setStats(s);
-        } else {
-          setStats(null);
-        }
+        setEditUrl(m.meetingUrl || '');
       } catch (e: any) {
         if (!cancelled) setError(e.message);
       }
@@ -178,6 +155,7 @@ export default function MeetingsPage() {
         body: {
           title,
           description: description || undefined,
+          meetingUrl: meetingUrl.trim() || undefined,
           type: startNow ? 'INSTANT' : recurrence !== 'NONE' ? 'RECURRING' : 'SCHEDULED',
           startsAt: startNow ? new Date().toISOString() : fromLocalInputValue(startsAt),
           endsAt: fromLocalInputValue(endsAt),
@@ -188,12 +166,8 @@ export default function MeetingsPage() {
         } as any,
       });
       await loadCalendar();
-      if (startNow || created.status === 'LIVE') {
-        openMeetingRoom(created.id);
-        navigate(`/meetings/${created.id}`);
-      } else {
-        navigate(`/meetings/${created.id}`);
-      }
+      if (created.meetingUrl) openExternalMeeting(created.meetingUrl);
+      navigate(`/meetings/${created.id}`);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -204,8 +178,29 @@ export default function MeetingsPage() {
   async function startMeeting(meetingId: number) {
     setBusy(true);
     try {
-      await api(`/meetings/${meetingId}/start`, { method: 'POST', body: {} as any });
-      openMeetingRoom(meetingId);
+      const m = await api<Meeting>(`/meetings/${meetingId}/start`, { method: 'POST', body: {} as any });
+      setDetail(m);
+      if (m.meetingUrl) openExternalMeeting(m.meetingUrl);
+      await loadCalendar();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveMeetingUrl() {
+    if (!detail) return;
+    setBusy(true);
+    setError('');
+    try {
+      const m = await api<Meeting>(`/meetings/${detail.id}`, {
+        method: 'PATCH',
+        body: { meetingUrl: editUrl.trim() || null } as any,
+      });
+      setDetail(m);
+      setEditUrl(m.meetingUrl || '');
+      await loadCalendar();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -230,6 +225,22 @@ export default function MeetingsPage() {
     }
   }
 
+  async function endMeeting(meetingId: number) {
+    setBusy(true);
+    try {
+      const m = await api<Meeting>(`/meetings/${meetingId}`, {
+        method: 'PATCH',
+        body: { status: 'ENDED' } as any,
+      });
+      setDetail(m);
+      await loadCalendar();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleInvitee(uid: number) {
     setInviteeIds((prev) => (prev.includes(uid) ? prev.filter((x) => x !== uid) : [...prev, uid]));
   }
@@ -240,7 +251,7 @@ export default function MeetingsPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="page-title">جلسه جدید</h1>
-            <p className="page-sub">فوری، زمان‌بندی‌شده یا تکراری — مثل گوگل میت داخل سامانه</p>
+            <p className="page-sub">لینک گوگل میت، زوم یا هر سرویس دیگری را ثبت کنید</p>
           </div>
           <Link to="/meetings" className="btn-ghost">
             بازگشت
@@ -259,6 +270,17 @@ export default function MeetingsPage() {
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
           </label>
           <label className="block">
+            <span className="label">لینک جلسه (Google Meet / Zoom / …)</span>
+            <input
+              className="input"
+              type="url"
+              dir="ltr"
+              placeholder="https://meet.google.com/..."
+              value={meetingUrl}
+              onChange={(e) => setMeetingUrl(e.target.value)}
+            />
+          </label>
+          <label className="block">
             <span className="label">توضیحات</span>
             <textarea
               className="input min-h-[80px]"
@@ -273,7 +295,7 @@ export default function MeetingsPage() {
               checked={startNow}
               onChange={(e) => setStartNow(e.target.checked)}
             />
-            شروع فوری (همین الان وارد اتاق شوید)
+            شروع فوری (وضعیت «در حال برگزاری»)
           </label>
 
           {!startNow && (
@@ -353,7 +375,7 @@ export default function MeetingsPage() {
 
           <div className="flex flex-wrap gap-2">
             <button type="submit" className="btn-primary" disabled={busy}>
-              {busy ? '...' : startNow ? 'شروع جلسه' : 'ایجاد جلسه'}
+              {busy ? '...' : startNow ? 'ایجاد و باز کردن لینک' : 'ایجاد جلسه'}
             </button>
             <Link to="/meetings" className="btn-ghost">
               انصراف
@@ -404,6 +426,36 @@ export default function MeetingsPage() {
           </div>
         </div>
 
+        <div className="panel space-y-3 p-5">
+          <h2 className="text-sm font-bold">لینک جلسه</h2>
+          {isHost ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className="input flex-1"
+                dir="ltr"
+                placeholder="https://meet.google.com/..."
+                value={editUrl}
+                onChange={(e) => setEditUrl(e.target.value)}
+              />
+              <button type="button" className="btn-ghost" disabled={busy} onClick={saveMeetingUrl}>
+                ذخیره لینک
+              </button>
+            </div>
+          ) : detail.meetingUrl ? (
+            <a
+              href={detail.meetingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all text-sm font-semibold text-brand"
+              dir="ltr"
+            >
+              {detail.meetingUrl}
+            </a>
+          ) : (
+            <p className="text-sm text-ink-mute">هنوز لینکی ثبت نشده است</p>
+          )}
+        </div>
+
         <div className="panel p-5">
           <h2 className="mb-3 text-sm font-bold">شرکت‌کنندگان دعوت‌شده</h2>
           <div className="flex flex-wrap gap-2">
@@ -417,67 +469,41 @@ export default function MeetingsPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {(detail.status === 'LIVE' || detail.status === 'SCHEDULED') && (
+          {detail.meetingUrl && detail.status !== 'CANCELLED' && detail.status !== 'ENDED' && (
             <button
               type="button"
               className="btn-primary"
-              disabled={busy}
-              onClick={() =>
-                detail.status === 'LIVE'
-                  ? openMeetingRoom(detail.id)
-                  : startMeeting(detail.id)
-              }
+              onClick={() => openExternalMeeting(detail.meetingUrl)}
             >
-              {detail.status === 'LIVE' ? 'ورود به اتاق' : 'شروع جلسه'}
+              ورود به جلسه
             </button>
           )}
-          {detail.status === 'LIVE' && (
-            <Link
-              to={`/meetings/${detail.id}/room`}
-              target="_blank"
-              rel="noopener noreferrer"
+          {isHost && detail.status === 'SCHEDULED' && (
+            <button
+              type="button"
               className="btn-ghost"
+              disabled={busy}
+              onClick={() => startMeeting(detail.id)}
             >
-              باز کردن اتاق جلسه
-            </Link>
+              اعلام شروع
+            </button>
+          )}
+          {isHost && detail.status === 'LIVE' && (
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => endMeeting(detail.id)}>
+              پایان جلسه
+            </button>
           )}
           {isHost && detail.status !== 'CANCELLED' && detail.status !== 'ENDED' && (
-            <button type="button" className="btn-danger" disabled={busy} onClick={() => cancelMeeting(detail.id)}>
+            <button
+              type="button"
+              className="btn-danger"
+              disabled={busy}
+              onClick={() => cancelMeeting(detail.id)}
+            >
               لغو جلسه
             </button>
           )}
         </div>
-
-        {stats && (
-          <div className="panel space-y-3 p-5">
-            <h2 className="text-sm font-bold">آمار حضور</h2>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-xl bg-surface-muted px-2 py-3">
-                <div className="text-lg font-bold">{stats.uniqueParticipants}</div>
-                <div className="text-[11px] text-ink-mute">نفر</div>
-              </div>
-              <div className="rounded-xl bg-surface-muted px-2 py-3">
-                <div className="text-lg font-bold">{formatDuration(stats.totalDurationSec)}</div>
-                <div className="text-[11px] text-ink-mute">مجموع</div>
-              </div>
-              <div className="rounded-xl bg-surface-muted px-2 py-3">
-                <div className="text-lg font-bold">{formatDuration(stats.avgDurationSec)}</div>
-                <div className="text-[11px] text-ink-mute">میانگین</div>
-              </div>
-            </div>
-            <div className="divide-y divide-line">
-              {stats.participants.map((p) => (
-                <div key={p.user.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span className="font-semibold">{p.user.fullName}</span>
-                  <span className="text-ink-mute">{formatDuration(p.durationSec)}</span>
-                </div>
-              ))}
-              {!stats.participants.length && (
-                <div className="py-3 text-center text-sm text-ink-mute">هنوز کسی وارد نشده</div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -487,11 +513,11 @@ export default function MeetingsPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="page-title">جلسات</h1>
-          <p className="page-sub">تقویم، دعوت، و اتاق تصویری داخل سامانه</p>
+          <p className="page-sub">تقویم و لینک گوگل میت / زوم و سایر سرویس‌ها</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to="/meetings?new=instant" className="btn-primary">
-            شروع فوری
+            جلسه فوری
           </Link>
           <Link to="/meetings?new=1" className="btn-ghost">
             جلسه زمان‌بندی‌شده
@@ -521,7 +547,11 @@ export default function MeetingsPage() {
         <h2 className="text-sm font-bold text-ink">پیش‌رو و فعال</h2>
         <div className="grid gap-3 md:grid-cols-2">
           {upcoming.map((m) => (
-            <Link key={m.id} to={`/meetings/${m.id}`} className="panel block p-4 transition hover:border-[color:rgb(var(--brand-rgb)/0.4)]">
+            <Link
+              key={m.id}
+              to={`/meetings/${m.id}`}
+              className="panel block p-4 transition hover:border-[color:rgb(var(--brand-rgb)/0.4)]"
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="truncate font-bold text-ink">{m.title}</div>
@@ -529,6 +559,7 @@ export default function MeetingsPage() {
                   <div className="mt-1 text-xs text-ink-faint">
                     میزبان: {m.host.fullName}
                     {m.recurrence !== 'NONE' ? ` · ${recurrenceLabel[m.recurrence]}` : ''}
+                    {m.meetingUrl ? ' · دارای لینک' : ''}
                   </div>
                 </div>
                 <span className={`chip shrink-0 ${statusChip(m.status)}`}>{statusLabel[m.status]}</span>
@@ -537,7 +568,7 @@ export default function MeetingsPage() {
           ))}
           {!upcoming.length && (
             <div className="panel p-6 text-center text-sm text-ink-mute md:col-span-2">
-              جلسه‌ای در پیش نیست — یک جلسه فوری بسازید.
+              جلسه‌ای در پیش نیست — یک جلسه با لینک گوگل میت بسازید.
             </div>
           )}
         </div>

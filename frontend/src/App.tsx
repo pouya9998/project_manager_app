@@ -16,7 +16,6 @@ import AppSettingsPage from './pages/AppSettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import LettersPage from './pages/LettersPage';
 import MeetingsPage from './pages/MeetingsPage';
-import MeetingRoomPage from './pages/MeetingRoomPage';
 
 function Private({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -95,14 +94,6 @@ export default function App() {
           }
         />
       </Route>
-      <Route
-        path="/meetings/:id/room"
-        element={
-          <Private>
-            <MeetingRoomPage />
-          </Private>
-        }
-      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

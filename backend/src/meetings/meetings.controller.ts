@@ -38,6 +38,10 @@ class CreateMeetingDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  meetingUrl?: string;
+
+  @IsOptional()
   @IsEnum(MeetingType)
   type?: MeetingType;
 
@@ -80,6 +84,10 @@ class UpdateMeetingDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  meetingUrl?: string | null;
 
   @IsOptional()
   @IsDateString()
@@ -147,25 +155,5 @@ export class MeetingsController {
   @Post(':id/start')
   start(@CurrentUser() user: { id: number }, @Param('id', ParseIntPipe) id: number) {
     return this.meetings.start(id, user.id);
-  }
-
-  @Post(':id/join-token')
-  joinToken(@CurrentUser() user: { id: number }, @Param('id', ParseIntPipe) id: number) {
-    return this.meetings.joinToken(id, user.id);
-  }
-
-  @Post(':id/leave')
-  leave(@CurrentUser() user: { id: number }, @Param('id', ParseIntPipe) id: number) {
-    return this.meetings.leave(id, user.id);
-  }
-
-  @Post(':id/end')
-  end(@CurrentUser() user: { id: number }, @Param('id', ParseIntPipe) id: number) {
-    return this.meetings.end(id, user.id);
-  }
-
-  @Get(':id/stats')
-  stats(@CurrentUser() user: { id: number }, @Param('id', ParseIntPipe) id: number) {
-    return this.meetings.stats(id, user.id);
   }
 }

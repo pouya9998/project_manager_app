@@ -11,15 +11,24 @@ import {
   MeetingStatus,
   MeetingType,
 } from '@prisma/client';
-import { AccessToken } from 'livekit-server-sdk';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 const userSelect = { id: true, fullName: true, email: true, avatarFile: true };
 
+function normalizeMeetingUrl(raw?: string | null) {
+  const url = (raw || '').trim();
+  if (!url) return null;
+  if (!/^https?:\/\//i.test(url)) {
+    throw new BadRequestException('لینک جلسه باید با http:// یا https:// شروع شود');
+  }
+  return url;
+}
+
 export type CreateMeetingInput = {
   title: string;
   description?: string;
+  meetingUrl?: string;
   type?: MeetingType;
   startsAt?: string;
   endsAt?: string;
@@ -36,18 +45,6 @@ export class MeetingsService {
     private prisma: PrismaService,
     private notifications: NotificationsService,
   ) {}
-
-  private apiKey() {
-    return process.env.LIVEKIT_API_KEY || 'devkey';
-  }
-
-  private apiSecret() {
-    return process.env.LIVEKIT_API_SECRET || 'secret';
-  }
-
-  private publicUrl() {
-    return process.env.LIVEKIT_PUBLIC_URL || 'ws://localhost:7880';
-  }
 
   private async assertAccess(meetingId: number, userId: number) {
     const meeting = await this.prisma.meeting.findUnique({
@@ -85,7 +82,6 @@ export class MeetingsService {
         host: { select: userSelect },
         invitees: { include: { user: { select: userSelect } } },
         project: { select: { id: true, name: true } },
-        _count: { select: { attendance: true } },
       },
     });
   }
@@ -96,16 +92,14 @@ export class MeetingsService {
       where: { meetingId: id },
       include: { user: { select: userSelect } },
     });
-    const openAttendance = await this.prisma.meetingAttendance.count({
-      where: { meetingId: id, leftAt: null },
-    });
-    return { ...meeting, invitees, liveParticipants: openAttendance };
+    return { ...meeting, invitees };
   }
 
   async create(hostId: number, data: CreateMeetingInput) {
     const title = (data.title || '').trim();
     if (!title) throw new BadRequestException('عنوان جلسه الزامی است');
 
+    const meetingUrl = normalizeMeetingUrl(data.meetingUrl);
     const type = data.type || (data.startNow ? MeetingType.INSTANT : MeetingType.SCHEDULED);
     const recurrence = data.recurrence || MeetingRecurrence.NONE;
     const now = new Date();
@@ -119,17 +113,17 @@ export class MeetingsService {
     const inviteeIds = [...new Set((data.inviteeIds || []).filter((id) => id !== hostId))];
     const startNow = !!data.startNow || type === MeetingType.INSTANT;
 
-    const meeting = await this.prisma.meeting.create({
+    const created = await this.prisma.meeting.create({
       data: {
         title,
         description: data.description?.trim() || null,
+        meetingUrl,
         type: recurrence !== MeetingRecurrence.NONE ? MeetingType.RECURRING : type,
         status: startNow ? MeetingStatus.LIVE : MeetingStatus.SCHEDULED,
         recurrence,
         recurrenceUntil: data.recurrenceUntil ? new Date(data.recurrenceUntil) : null,
         startsAt,
         endsAt,
-        livekitRoom: `pmo-meet-tmp-${Date.now()}`,
         hostId,
         projectId: data.projectId || null,
         startedAt: startNow ? now : null,
@@ -150,23 +144,13 @@ export class MeetingsService {
       },
     });
 
-    const updated = await this.prisma.meeting.update({
-      where: { id: meeting.id },
-      data: { livekitRoom: `pmo-meet-${meeting.id}` },
-      include: {
-        host: { select: userSelect },
-        invitees: { include: { user: { select: userSelect } } },
-        project: { select: { id: true, name: true } },
-      },
-    });
-
     if (inviteeIds.length) {
       await this.notifications.notifyUsers(inviteeIds, {
         type: AppNotificationType.MEETING_INVITE,
         title: startNow ? 'جلسه در حال برگزاری' : 'دعوت به جلسه',
-        body: `${updated.host.fullName}: ${updated.title}`,
-        link: `/meetings/${updated.id}`,
-        meta: { meetingId: updated.id },
+        body: `${created.host.fullName}: ${created.title}`,
+        link: `/meetings/${created.id}`,
+        meta: { meetingId: created.id },
       });
     }
 
@@ -174,13 +158,13 @@ export class MeetingsService {
       await this.notifications.notifyUsers(inviteeIds, {
         type: AppNotificationType.MEETING_STARTED,
         title: 'شروع جلسه',
-        body: `جلسه «${updated.title}» شروع شد`,
-        link: `/meetings/${updated.id}/room`,
-        meta: { meetingId: updated.id },
+        body: `جلسه «${created.title}» شروع شد`,
+        link: `/meetings/${created.id}`,
+        meta: { meetingId: created.id },
       });
     }
 
-    return updated;
+    return created;
   }
 
   async update(
@@ -189,6 +173,7 @@ export class MeetingsService {
     data: {
       title?: string;
       description?: string;
+      meetingUrl?: string | null;
       startsAt?: string;
       endsAt?: string;
       inviteeIds?: number[];
@@ -224,6 +209,8 @@ export class MeetingsService {
       data: {
         title: data.title?.trim(),
         description: data.description === undefined ? undefined : data.description?.trim() || null,
+        meetingUrl:
+          data.meetingUrl === undefined ? undefined : normalizeMeetingUrl(data.meetingUrl),
         startsAt: data.startsAt ? new Date(data.startsAt) : undefined,
         endsAt: data.endsAt ? new Date(data.endsAt) : undefined,
         status: data.status,
@@ -235,6 +222,7 @@ export class MeetingsService {
               ? new Date(data.recurrenceUntil)
               : null,
         projectId: data.projectId === undefined ? undefined : data.projectId,
+        endedAt: data.status === MeetingStatus.ENDED ? new Date() : undefined,
       },
       include: {
         host: { select: userSelect },
@@ -272,173 +260,10 @@ export class MeetingsService {
         type: AppNotificationType.MEETING_STARTED,
         title: 'شروع جلسه',
         body: `جلسه «${updated.title}» شروع شد`,
-        link: `/meetings/${updated.id}/room`,
+        link: `/meetings/${updated.id}`,
         meta: { meetingId: updated.id },
       });
     }
     return updated;
-  }
-
-  async joinToken(id: number, userId: number) {
-    const meeting = await this.assertAccess(id, userId);
-    if (meeting.status === MeetingStatus.CANCELLED) {
-      throw new BadRequestException('جلسه لغو شده است');
-    }
-    if (meeting.status === MeetingStatus.ENDED) {
-      throw new BadRequestException('جلسه پایان یافته است');
-    }
-
-    if (meeting.status === MeetingStatus.SCHEDULED) {
-      // Allow early join within 15 minutes, or host anytime
-      const early = meeting.startsAt.getTime() - Date.now() <= 15 * 60 * 1000;
-      if (meeting.hostId !== userId && !early) {
-        throw new BadRequestException('هنوز زمان شروع جلسه نرسیده است');
-      }
-      await this.prisma.meeting.update({
-        where: { id },
-        data: { status: MeetingStatus.LIVE, startedAt: meeting.startedAt || new Date() },
-      });
-    }
-
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('کاربر یافت نشد');
-
-    // Close any dangling open segments for this user/meeting, then open a new one
-    const open = await this.prisma.meetingAttendance.findMany({
-      where: { meetingId: id, userId, leftAt: null },
-    });
-    const now = new Date();
-    for (const row of open) {
-      const durationSec =
-        row.durationSec + Math.max(0, Math.floor((now.getTime() - row.joinedAt.getTime()) / 1000));
-      await this.prisma.meetingAttendance.update({
-        where: { id: row.id },
-        data: { leftAt: now, durationSec },
-      });
-    }
-    await this.prisma.meetingAttendance.create({
-      data: { meetingId: id, userId, joinedAt: now },
-    });
-
-    const at = new AccessToken(this.apiKey(), this.apiSecret(), {
-      identity: String(userId),
-      name: user.fullName,
-      ttl: '6h',
-      metadata: JSON.stringify({ meetingId: id, role: meeting.hostId === userId ? 'HOST' : 'PARTICIPANT' }),
-    });
-    at.addGrant({
-      roomJoin: true,
-      room: meeting.livekitRoom,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true,
-    });
-
-    const token = await at.toJwt();
-    return {
-      token,
-      url: this.publicUrl(),
-      roomName: meeting.livekitRoom,
-      meetingId: id,
-      isHost: meeting.hostId === userId,
-      title: meeting.title,
-    };
-  }
-
-  async leave(id: number, userId: number) {
-    await this.assertAccess(id, userId);
-    const open = await this.prisma.meetingAttendance.findMany({
-      where: { meetingId: id, userId, leftAt: null },
-      orderBy: { joinedAt: 'desc' },
-    });
-    const now = new Date();
-    for (const row of open) {
-      const durationSec =
-        row.durationSec + Math.max(0, Math.floor((now.getTime() - row.joinedAt.getTime()) / 1000));
-      await this.prisma.meetingAttendance.update({
-        where: { id: row.id },
-        data: { leftAt: now, durationSec },
-      });
-    }
-    return { ok: true };
-  }
-
-  async end(id: number, hostId: number) {
-    await this.assertHost(id, hostId);
-    const now = new Date();
-    const open = await this.prisma.meetingAttendance.findMany({
-      where: { meetingId: id, leftAt: null },
-    });
-    for (const row of open) {
-      const durationSec =
-        row.durationSec + Math.max(0, Math.floor((now.getTime() - row.joinedAt.getTime()) / 1000));
-      await this.prisma.meetingAttendance.update({
-        where: { id: row.id },
-        data: { leftAt: now, durationSec },
-      });
-    }
-    return this.prisma.meeting.update({
-      where: { id },
-      data: { status: MeetingStatus.ENDED, endedAt: now },
-      include: {
-        host: { select: userSelect },
-        invitees: { include: { user: { select: userSelect } } },
-      },
-    });
-  }
-
-  async stats(id: number, userId: number) {
-    await this.assertAccess(id, userId);
-    const rows = await this.prisma.meetingAttendance.findMany({
-      where: { meetingId: id },
-      include: { user: { select: userSelect } },
-      orderBy: { joinedAt: 'asc' },
-    });
-
-    const byUser = new Map<
-      number,
-      {
-        user: (typeof rows)[0]['user'];
-        joinedAt: Date;
-        leftAt: Date | null;
-        durationSec: number;
-        sessions: number;
-      }
-    >();
-
-    for (const row of rows) {
-      const prev = byUser.get(row.userId);
-      const openExtra =
-        !row.leftAt && row.joinedAt
-          ? Math.max(0, Math.floor((Date.now() - row.joinedAt.getTime()) / 1000))
-          : 0;
-      const durationSec = row.durationSec + openExtra;
-      if (!prev) {
-        byUser.set(row.userId, {
-          user: row.user,
-          joinedAt: row.joinedAt,
-          leftAt: row.leftAt,
-          durationSec,
-          sessions: 1,
-        });
-      } else {
-        prev.durationSec += durationSec;
-        prev.sessions += 1;
-        if (row.joinedAt < prev.joinedAt) prev.joinedAt = row.joinedAt;
-        if (row.leftAt && (!prev.leftAt || row.leftAt > prev.leftAt)) prev.leftAt = row.leftAt;
-        if (!row.leftAt) prev.leftAt = null;
-      }
-    }
-
-    const participants = [...byUser.values()].sort((a, b) => b.durationSec - a.durationSec);
-    const totalDurationSec = participants.reduce((s, p) => s + p.durationSec, 0);
-    return {
-      participants,
-      totalDurationSec,
-      avgDurationSec: participants.length
-        ? Math.round(totalDurationSec / participants.length)
-        : 0,
-      uniqueParticipants: participants.length,
-    };
   }
 }

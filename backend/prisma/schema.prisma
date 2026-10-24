@@ -231,9 +231,8 @@ model User {
   lettersSent       Letter[]             @relation("LetterSender")
   letterReceipts    LetterRecipient[]
   letterTemplates   LetterTemplate[]
-  meetingsHosted    Meeting[]            @relation("MeetingHost")
-  meetingInvitees   MeetingInvitee[]
-  meetingAttendance MeetingAttendance[]
+  meetingsHosted  Meeting[]         @relation("MeetingHost")
+  meetingInvitees MeetingInvitee[]
 }
 
 model GitLabConfig {
@@ -745,6 +744,8 @@ model Meeting {
   id              Int               @id @default(autoincrement())
   title           String
   description     String?
+  /// External link (Google Meet, Zoom, …)
+  meetingUrl      String?
   type            MeetingType       @default(SCHEDULED)
   status          MeetingStatus     @default(SCHEDULED)
   recurrence      MeetingRecurrence @default(NONE)
@@ -752,7 +753,6 @@ model Meeting {
   timezone        String            @default("Asia/Tehran")
   startsAt        DateTime
   endsAt          DateTime?
-  livekitRoom     String            @unique
   host            User              @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
   hostId          Int
   project         Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -762,8 +762,7 @@ model Meeting {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  invitees    MeetingInvitee[]
-  attendance  MeetingAttendance[]
+  invitees MeetingInvitee[]
 
   @@index([hostId, startsAt])
   @@index([status, startsAt])
@@ -781,18 +780,4 @@ model MeetingInvitee {
 
   @@unique([meetingId, userId])
   @@index([userId])
-}
-
-model MeetingAttendance {
-  id          Int       @id @default(autoincrement())
-  meeting     Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  meetingId   Int
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      Int
-  joinedAt    DateTime  @default(now())
-  leftAt      DateTime?
-  durationSec Int       @default(0)
-
-  @@index([meetingId, userId])
-  @@index([userId, joinedAt])
 }
