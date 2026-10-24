@@ -5,8 +5,10 @@ import App from './App';
 import { AuthProvider } from './lib/auth';
 import { SettingsProvider } from './lib/settings';
 import { initPwaInstallCapture } from './lib/pwa-install';
+import { initThemeMode } from './lib/theme-mode';
 import './index.css';
 
+initThemeMode();
 initPwaInstallCapture();
 
 if ('serviceWorker' in navigator) {

@@ -37,18 +37,29 @@ export function normalizeHex(color?: string | null) {
 
 export function applyBrandTheme(color?: string | null) {
   const primary = normalizeHex(color);
-  const dark = mix(primary, '#000000', 0.22);
-  const soft = mix(primary, '#ffffff', 0.88);
-  const mist = mix(primary, '#ffffff', 0.72);
+  const isDark = document.documentElement.classList.contains('dark');
+  const dark = mix(primary, '#000000', isDark ? 0.28 : 0.22);
+  // On dark UI, accent text must be lighter than the brand, not darker
+  const fg = isDark ? mix(primary, '#ffffff', 0.42) : dark;
+  const soft = mix(primary, isDark ? '#12161d' : '#ffffff', isDark ? 0.78 : 0.88);
+  const mist = mix(primary, isDark ? '#12161d' : '#ffffff', isDark ? 0.62 : 0.72);
+  // Chat bubbles: soft brand wash — never a solid loud green slab in dark mode
+  const bubbleMine = isDark
+    ? mix(primary, '#2a3140', 0.72)
+    : mix(primary, '#ffffff', 0.82);
+  const bubbleTheirs = isDark ? '#252b38' : '#ffffff';
   const root = document.documentElement;
   root.style.setProperty('--brand', primary);
   root.style.setProperty('--brand-dark', dark);
+  root.style.setProperty('--brand-fg', fg);
   root.style.setProperty('--brand-soft', soft);
   root.style.setProperty('--brand-mist', mist);
   root.style.setProperty('--brand-rgb', Object.values(hexToRgb(primary)).join(' '));
+  root.style.setProperty('--bubble-mine', bubbleMine);
+  root.style.setProperty('--bubble-theirs', bubbleTheirs);
 
   const themeMeta = document.querySelector('meta[name="theme-color"]');
-  if (themeMeta) themeMeta.setAttribute('content', primary);
+  if (themeMeta) themeMeta.setAttribute('content', isDark ? '#12161d' : primary);
 }
 
 /** Apply custom favicon from settings, or fall back to default /favicon.svg */

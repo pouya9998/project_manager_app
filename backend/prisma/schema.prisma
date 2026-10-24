@@ -93,6 +93,39 @@ enum AppNotificationType {
   DEPLOYMENT_FAILED
   TASK_BLOCKED
   GITLAB_SYNC
+  LETTER_RECEIVED
+  MEETING_INVITE
+  MEETING_STARTED
+}
+
+enum LetterStatus {
+  DRAFT
+  SENT
+}
+
+enum MeetingType {
+  INSTANT
+  SCHEDULED
+  RECURRING
+}
+
+enum MeetingRecurrence {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+  CANCELLED
+}
+
+enum MeetingInviteeRole {
+  HOST
+  PARTICIPANT
 }
 
 enum EngineeringEventSource {
@@ -192,8 +225,15 @@ model User {
   chatMemberships   ChatRoomMember[]
   chatReceipts      ChatMessageReceipt[]
   chatPollVotes     ChatPollVote[]
+  chatReactions     ChatMessageReaction[]
   notifications     AppNotification[]
   pushSubscriptions PushSubscription[]
+  lettersSent       Letter[]             @relation("LetterSender")
+  letterReceipts    LetterRecipient[]
+  letterTemplates   LetterTemplate[]
+  meetingsHosted    Meeting[]            @relation("MeetingHost")
+  meetingInvitees   MeetingInvitee[]
+  meetingAttendance MeetingAttendance[]
 }
 
 model GitLabConfig {
@@ -235,6 +275,7 @@ model Project {
   pipelines           GitlabPipeline[]
   releases            ProjectRelease[]
   deployments         ProjectDeployment[]
+  meetings            Meeting[]
 }
 
 model GitLabWebhookEvent {
@@ -302,9 +343,23 @@ model ChatMessage {
   editedAt     DateTime?
   receipts     ChatMessageReceipt[]
   mentions     ChatMessageMention[]
+  reactions    ChatMessageReaction[]
   poll         ChatPoll?
 
   @@index([roomId, createdAt])
+}
+
+model ChatMessageReaction {
+  id        Int         @id @default(autoincrement())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId Int
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  emoji     String
+  createdAt DateTime    @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
 
 model ChatMessageReceipt {
@@ -640,4 +695,104 @@ model CommentMention {
   userId    Int
 
   @@unique([commentId, userId])
+}
+
+/// Official in-app correspondence (نامه‌نگاری)
+model Letter {
+  id        Int               @id @default(autoincrement())
+  subject   String
+  body      String
+  status    LetterStatus      @default(DRAFT)
+  sender    User              @relation("LetterSender", fields: [senderId], references: [id], onDelete: Cascade)
+  senderId  Int
+  sentAt    DateTime?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  recipients LetterRecipient[]
+
+  @@index([senderId, createdAt])
+  @@index([status, sentAt])
+}
+
+model LetterRecipient {
+  id       Int       @id @default(autoincrement())
+  letter   Letter    @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  letterId Int
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   Int
+  readAt   DateTime?
+
+  @@unique([letterId, userId])
+  @@index([userId, readAt])
+}
+
+model LetterTemplate {
+  id          Int      @id @default(autoincrement())
+  title       String
+  subject     String
+  body        String
+  /// Placeholders: {{fullName}} {{appName}} {{date}} {{senderName}}
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById Int
+  isShared    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdById])
+}
+
+model Meeting {
+  id              Int               @id @default(autoincrement())
+  title           String
+  description     String?
+  type            MeetingType       @default(SCHEDULED)
+  status          MeetingStatus     @default(SCHEDULED)
+  recurrence      MeetingRecurrence @default(NONE)
+  recurrenceUntil DateTime?
+  timezone        String            @default("Asia/Tehran")
+  startsAt        DateTime
+  endsAt          DateTime?
+  livekitRoom     String            @unique
+  host            User              @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId          Int
+  project         Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId       Int?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  invitees    MeetingInvitee[]
+  attendance  MeetingAttendance[]
+
+  @@index([hostId, startsAt])
+  @@index([status, startsAt])
+  @@index([projectId])
+}
+
+model MeetingInvitee {
+  id        Int                @id @default(autoincrement())
+  meeting   Meeting            @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId Int
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  role      MeetingInviteeRole @default(PARTICIPANT)
+  createdAt DateTime           @default(now())
+
+  @@unique([meetingId, userId])
+  @@index([userId])
+}
+
+model MeetingAttendance {
+  id          Int       @id @default(autoincrement())
+  meeting     Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId   Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  joinedAt    DateTime  @default(now())
+  leftAt      DateTime?
+  durationSec Int       @default(0)
+
+  @@index([meetingId, userId])
+  @@index([userId, joinedAt])
 }

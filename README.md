@@ -11,6 +11,7 @@ Detailed install guide (Persian): **[INSTALL.md](./INSTALL.md)**
 - **Tasks** — assignees, priorities, attachments, comments with @mentions
 - **GitLab** — link projects, commits, and merge requests to tasks
 - **Chat** — groups & DMs, voice notes, images, polls, emoji, delivery/read receipts, task/project mentions
+- **Meetings** — Jalali calendar, instant/scheduled/recurring meetings, LiveKit A/V + screen share + emoji reactions, attendance stats
 - **Notifications** — in-app bell + Web Push (installable PWA)
 - **Time tracking** — users log hours; admins approve / adjust / reject
 - **Branding** — app name, tagline, logo, primary color
@@ -20,15 +21,16 @@ Detailed install guide (Persian): **[INSTALL.md](./INSTALL.md)**
 
 | Layer | Stack |
 |--------|--------|
-| Backend | NestJS, Prisma, PostgreSQL, Socket.IO, Web Push |
-| Frontend | React, Vite, Tailwind CSS, PWA |
+| Backend | NestJS, Prisma, PostgreSQL, Socket.IO, Web Push, LiveKit tokens |
+| Frontend | React, Vite, Tailwind CSS, PWA, LiveKit |
+| Media | LiveKit SFU (voice / video / screen share) |
 | Deploy | Docker Compose |
 
 ## Quick start (Docker)
 
 ```bash
 docker compose up --build -d
-```
+```th
 
 Open: **http://localhost:3080**
 
@@ -47,8 +49,11 @@ Change these passwords after first login.
 ```bash
 docker compose ps
 docker compose logs -f backend
+docker compose logs -f livekit
 docker compose down
 ```
+
+LiveKit runs with **host networking** (`--dev` on UDP **7882**). Browsers join via `ws://localhost:7880`; ICE uses the auto-detected LAN IP. Do not publish UDP `50000–50100` in Compose — that range creates hundreds of `docker-proxy` processes and can leave the container stuck.
 
 ## Local development
 

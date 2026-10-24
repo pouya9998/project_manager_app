@@ -14,6 +14,9 @@ import EffortsPage from './pages/EffortsPage';
 import GitlabSettingsPage from './pages/GitlabSettingsPage';
 import AppSettingsPage from './pages/AppSettingsPage';
 import ProfilePage from './pages/ProfilePage';
+import LettersPage from './pages/LettersPage';
+import MeetingsPage from './pages/MeetingsPage';
+import MeetingRoomPage from './pages/MeetingRoomPage';
 
 function Private({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -54,6 +57,10 @@ export default function App() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:roomId" element={<ChatPage />} />
         <Route path="efforts" element={<EffortsPage />} />
+        <Route path="letters" element={<LettersPage />} />
+        <Route path="letters/:id" element={<LettersPage />} />
+        <Route path="meetings" element={<MeetingsPage />} />
+        <Route path="meetings/:id" element={<MeetingsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route
           path="users"
@@ -88,6 +95,14 @@ export default function App() {
           }
         />
       </Route>
+      <Route
+        path="/meetings/:id/room"
+        element={
+          <Private>
+            <MeetingRoomPage />
+          </Private>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

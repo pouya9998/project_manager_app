@@ -1,0 +1,21 @@
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+  node_ip: 127.0.0.1
+  stun_servers:
+    - stun.l.google.com:19302
+keys:
+  # Dev keys — change in production
+  APIpmoDevKey1234567890abcdefgh: secretpmoDevSecretChangeMe_32chars_min
+logging:
+  level: info
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 50

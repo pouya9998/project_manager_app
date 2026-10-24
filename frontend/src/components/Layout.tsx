@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useSettings } from '../lib/settings';
 import { api, uploadsUrl } from '../lib/api';
 import { enablePushNotifications } from '../lib/push';
+import { applyBrandTheme } from '../lib/theme';
+import { getStoredTheme, toggleThemeMode, type ThemeMode } from '../lib/theme-mode';
 import BrandLogo from './BrandLogo';
 import PwaInstallButton from './PwaInstallButton';
 
@@ -11,6 +14,8 @@ const links = [
   { to: '/', label: 'داشبورد', end: true },
   { to: '/board', label: 'تابلو وظایف' },
   { to: '/chat', label: 'گفتگو' },
+  { to: '/meetings', label: 'جلسات' },
+  { to: '/letters', label: 'نامه‌نگاری' },
   { to: '/projects', label: 'پروژه‌ها' },
   { to: '/efforts', label: 'زمان‌ها' },
 ];
@@ -19,8 +24,8 @@ const mobileLinks = [
   { to: '/', label: 'داشبورد', end: true, icon: 'home' as const },
   { to: '/board', label: 'تابلو', icon: 'board' as const },
   { to: '/chat', label: 'گفتگو', icon: 'chat' as const },
+  { to: '/meetings', label: 'جلسه', icon: 'meeting' as const },
   { to: '/projects', label: 'پروژه', icon: 'project' as const },
-  { to: '/efforts', label: 'زمان', icon: 'effort' as const },
 ];
 
 const adminLinks = [
@@ -31,7 +36,7 @@ const adminLinks = [
 ];
 
 function TabIcon({ name, active }: { name: (typeof mobileLinks)[number]['icon']; active: boolean }) {
-  const stroke = active ? 'var(--brand-dark)' : 'currentColor';
+  const stroke = active ? 'var(--brand-fg)' : 'currentColor';
   const common = {
     width: 22,
     height: 22,
@@ -66,18 +71,19 @@ function TabIcon({ name, active }: { name: (typeof mobileLinks)[number]['icon'];
           <path d="M9 10.5h6M9 13.5h4" />
         </svg>
       );
+    case 'meeting':
+      return (
+        <svg {...common}>
+          <rect x="3" y="6" width="18" height="12" rx="2" />
+          <circle cx="9" cy="12" r="2.2" />
+          <path d="M14 10.5h4M14 13.5h3" />
+        </svg>
+      );
     case 'project':
       return (
         <svg {...common}>
           <path d="M4 8.5h16v10a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-10z" />
           <path d="M8 8.5V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1.5" />
-        </svg>
-      );
-    case 'effort':
-      return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="8" />
-          <path d="M12 8v4.5l3 2" />
         </svg>
       );
     default:
@@ -104,6 +110,27 @@ function MenuIcon({ open }: { open: boolean }) {
         }`}
       />
     </span>
+  );
+}
+
+function ThemeToggleButton({ className = '' }: { className?: string }) {
+  const { settings } = useSettings();
+  const [mode, setMode] = useState<ThemeMode>(() => getStoredTheme());
+
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-label={mode === 'dark' ? 'حالت روشن' : 'حالت تاریک'}
+      title={mode === 'dark' ? 'حالت روشن' : 'حالت تاریک'}
+      onClick={() => {
+        const next = toggleThemeMode();
+        setMode(next);
+        applyBrandTheme(settings.primaryColor);
+      }}
+    >
+      {mode === 'dark' ? '☀️' : '🌙'}
+    </button>
   );
 }
 
@@ -185,6 +212,7 @@ function SideNav({
             </div>
           </div>
         </NavLink>
+        <ThemeNavButton onNavigate={onNavigate} />
         {showLogout !== false && (
           <button
             className="btn-ghost w-full"
@@ -202,41 +230,123 @@ function SideNav({
   );
 }
 
+function ThemeNavButton({ onNavigate }: { onNavigate?: () => void }) {
+  const { settings } = useSettings();
+  const [mode, setMode] = useState<ThemeMode>(() => getStoredTheme());
+
+  return (
+    <button
+      type="button"
+      className="btn-ghost mb-2 w-full justify-between"
+      onClick={() => {
+        const next = toggleThemeMode();
+        setMode(next);
+        applyBrandTheme(settings.primaryColor);
+        onNavigate?.();
+      }}
+    >
+      <span>حالت نمایش</span>
+      <span>{mode === 'dark' ? '☀️ روشن' : '🌙 تاریک'}</span>
+    </button>
+  );
+}
+
 function NotifPanel({
   open,
   items,
+  anchorRef,
   onClose,
 }: {
   open: boolean;
   items: any[];
+  anchorRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
-  if (!open) return null;
-  return (
-    <div className="absolute left-0 top-12 z-50 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-line bg-surface shadow-card">
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const list = Array.isArray(items) ? items : [];
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const place = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const width = Math.min(320, Math.max(260, window.innerWidth - 16));
+      // Prefer opening toward the main content (left of a right sidebar / under header btn)
+      let left = r.right - width;
+      left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+      const top = Math.min(r.bottom + 8, window.innerHeight - 120);
+      setPos({ top, left, width });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, anchorRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const onPointer = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    // defer so the opening click does not immediately close
+    const id = window.setTimeout(() => window.addEventListener('mousedown', onPointer), 0);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onPointer);
+    };
+  }, [open, onClose, anchorRef]);
+
+  if (!open || !pos) return null;
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-label="اعلان‌ها"
+      className="fixed z-[180] overflow-hidden rounded-xl border border-line bg-surface shadow-card"
+      style={{ top: pos.top, left: pos.left, width: pos.width }}
+    >
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <span className="text-sm font-bold">اعلان‌ها</span>
-        <button type="button" className="text-ink-mute" onClick={onClose}>
+        <span className="text-sm font-bold text-ink">اعلان‌ها</span>
+        <button type="button" className="btn-ghost px-2 py-1 text-sm text-ink-mute" onClick={onClose} aria-label="بستن">
           ✕
         </button>
       </div>
-      <div className="max-h-80 overflow-y-auto">
-        {items.length === 0 && (
+      <div className="max-h-[min(20rem,70vh)] overflow-y-auto">
+        {list.length === 0 ? (
           <div className="p-4 text-center text-sm text-ink-mute">اعلانی نیست</div>
+        ) : (
+          list.map((n) => (
+            <Link
+              key={n.id}
+              to={n.link || '/'}
+              onClick={onClose}
+              className="block border-b border-line/60 px-3 py-2.5 last:border-0 hover:bg-surface-soft"
+            >
+              <div className="text-sm font-semibold text-ink">{n.title || 'اعلان'}</div>
+              {n.body ? <div className="mt-0.5 text-xs text-ink-mute">{n.body}</div> : null}
+            </Link>
+          ))
         )}
-        {items.map((n) => (
-          <Link
-            key={n.id}
-            to={n.link || '/'}
-            onClick={onClose}
-            className="block border-b border-line/60 px-3 py-2.5 hover:bg-surface-soft"
-          >
-            <div className="text-sm font-semibold text-ink">{n.title}</div>
-            <div className="mt-0.5 text-xs text-ink-mute">{n.body}</div>
-          </Link>
-        ))}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -248,6 +358,9 @@ export default function Layout() {
   const [unread, setUnread] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifAnchor, setNotifAnchor] = useState<'mobile' | 'desktop'>('desktop');
+  const mobileNotifBtnRef = useRef<HTMLButtonElement>(null);
+  const desktopNotifBtnRef = useRef<HTMLButtonElement>(null);
   const isChat = location.pathname.startsWith('/chat');
   /** Hide mobile tabbar only inside a room — keep it on the chat list */
   const isChatRoom = /^\/chat\/\d+/.test(location.pathname);
@@ -284,20 +397,23 @@ export default function Layout() {
     };
   }, [user]);
 
-  async function openNotifications() {
-    const next = !notifOpen;
+  async function openNotifications(which: 'mobile' | 'desktop') {
+    const next = !(notifOpen && notifAnchor === which);
+    setNotifAnchor(which);
     setNotifOpen(next);
     if (next) {
       try {
         const list = await api('/notifications');
-        setNotifications(list);
+        setNotifications(Array.isArray(list) ? list : []);
         await api('/notifications/read-all', { method: 'PATCH', body: {} as any });
         setUnread(0);
       } catch {
-        /* ignore */
+        setNotifications([]);
       }
     }
   }
+
+  const activeNotifRef = notifAnchor === 'mobile' ? mobileNotifBtnRef : desktopNotifBtnRef;
 
   return (
     <div
@@ -316,13 +432,16 @@ export default function Layout() {
               )}
             </div>
           </div>
-          <div className="relative flex items-center gap-1">
+          <div className="flex items-center gap-1">
+            <ThemeToggleButton className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-surface-muted text-ink text-base" />
             <PwaInstallButton variant="icon" />
             <button
+              ref={mobileNotifBtnRef}
               type="button"
               className="relative grid h-10 w-10 place-items-center rounded-xl border border-line bg-surface-muted text-ink"
-              onClick={openNotifications}
+              onClick={() => openNotifications('mobile')}
               aria-label="اعلان‌ها"
+              aria-expanded={notifOpen && notifAnchor === 'mobile'}
             >
               🔔
               {unread > 0 && (
@@ -331,7 +450,6 @@ export default function Layout() {
                 </span>
               )}
             </button>
-            <NotifPanel open={notifOpen} items={notifications} onClose={() => setNotifOpen(false)} />
             <button
               type="button"
               className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-surface-muted text-ink"
@@ -402,11 +520,13 @@ export default function Layout() {
               )}
             </div>
           </div>
-          <div className="relative mb-4 px-1">
+          <div className="mb-4 px-1">
             <button
+              ref={desktopNotifBtnRef}
               type="button"
               className="btn-ghost relative w-full justify-between"
-              onClick={openNotifications}
+              onClick={() => openNotifications('desktop')}
+              aria-expanded={notifOpen && notifAnchor === 'desktop'}
             >
               <span>اعلان‌ها</span>
               {unread > 0 && (
@@ -415,10 +535,16 @@ export default function Layout() {
                 </span>
               )}
             </button>
-            <NotifPanel open={notifOpen} items={notifications} onClose={() => setNotifOpen(false)} />
           </div>
           <SideNav />
         </aside>
+
+        <NotifPanel
+          open={notifOpen}
+          items={notifications}
+          anchorRef={activeNotifRef}
+          onClose={() => setNotifOpen(false)}
+        />
 
         <main
           className={`min-w-0 flex-1 ${

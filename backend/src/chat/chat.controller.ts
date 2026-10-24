@@ -182,6 +182,17 @@ export class ChatController {
     return result;
   }
 
+  @Post('messages/:id/reactions')
+  async toggleReaction(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { emoji?: string },
+  ) {
+    const message = await this.chat.toggleReaction(id, user.id, body.emoji || '');
+    if (message) this.gateway.emitMessage(message.roomId, message);
+    return message;
+  }
+
   @Get('mentions/search')
   searchMentions(@Query('q') q?: string) {
     return this.chat.searchMentions(q || '');

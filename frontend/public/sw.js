@@ -1,5 +1,5 @@
 /* global self, caches, clients, fetch */
-const CACHE = 'pmo-shell-v2';
+const CACHE = 'pmo-shell-v3';
 const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/pwa-192.png', '/pwa-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -22,15 +22,26 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io')) return;
 
-  if (req.mode === 'navigate') {
+  // Always network-first for app shell + hashed bundles so UI fixes deploy immediately
+  const isAppShell =
+    req.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname === '/index.html' ||
+    url.pathname === '/sw.js' ||
+    url.pathname.startsWith('/assets/');
+
+  if (isAppShell) {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('/index.html', copy));
+          if (res && res.ok && url.origin === self.location.origin) {
+            const copy = res.clone();
+            const key = req.mode === 'navigate' ? '/index.html' : req;
+            caches.open(CACHE).then((c) => c.put(key, copy));
+          }
           return res;
         })
-        .catch(() => caches.match('/index.html')),
+        .catch(() => caches.match(req.mode === 'navigate' ? '/index.html' : req)),
     );
     return;
   }

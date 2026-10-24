@@ -22,6 +22,10 @@ const messageInclude = {
     include: { sender: { select: senderSelect } },
   },
   mentions: true,
+  reactions: {
+    include: { user: { select: senderSelect } },
+    orderBy: { createdAt: 'asc' as const },
+  },
   receipts: {
     include: { user: { select: senderSelect } },
   },
@@ -349,6 +353,35 @@ export class ChatService {
       },
     );
 
+    const taskMentions = (data.mentions || []).filter((m) => m.type === ChatMentionType.TASK);
+    if (taskMentions.length) {
+      const tasks = await this.prisma.task.findMany({
+        where: { id: { in: taskMentions.map((m) => m.refId) } },
+        include: { assignees: { select: { userId: true } } },
+      });
+      const sender = await this.prisma.user.findUnique({
+        where: { id: senderId },
+        select: { fullName: true },
+      });
+      for (const task of tasks) {
+        const notifyIds = [
+          ...new Set(
+            [task.creatorId, ...task.assignees.map((a) => a.userId)].filter(
+              (id) => id !== senderId,
+            ),
+          ),
+        ];
+        if (!notifyIds.length) continue;
+        await this.notifications.notifyUsers(notifyIds, {
+          type: AppNotificationType.TASK_MENTION,
+          title: 'ارجاع وظیفه در گفتگو',
+          body: `${sender?.fullName || 'کاربر'} به «${task.title}» در چت اشاره کرد`,
+          link: `/chat/${roomId}`,
+          meta: { roomId, messageId: message.id, taskId: task.id },
+        });
+      }
+    }
+
     return this.prisma.chatMessage.findUnique({
       where: { id: message.id },
       include: messageInclude,
@@ -489,8 +522,39 @@ export class ChatService {
     return { ok: true, id: messageId, roomId };
   }
 
+  async toggleReaction(messageId: number, userId: number, emoji: string) {
+    const clean = (emoji || '').trim().slice(0, 16);
+    if (!clean) throw new BadRequestException('ایموجی نامعتبر است');
+
+    const msg = await this.prisma.chatMessage.findUnique({ where: { id: messageId } });
+    if (!msg) throw new NotFoundException('پیام یافت نشد');
+    await this.assertMember(msg.roomId, userId);
+    if (msg.type === ChatMessageType.SYSTEM) {
+      throw new BadRequestException('روی این پیام نمی‌توان واکنش گذاشت');
+    }
+
+    const existing = await this.prisma.chatMessageReaction.findUnique({
+      where: {
+        messageId_userId_emoji: { messageId, userId, emoji: clean },
+      },
+    });
+    if (existing) {
+      await this.prisma.chatMessageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await this.prisma.chatMessageReaction.create({
+        data: { messageId, userId, emoji: clean },
+      });
+    }
+
+    return this.prisma.chatMessage.findUnique({
+      where: { id: messageId },
+      include: messageInclude,
+    });
+  }
+
   searchMentions(q: string) {
     const query = (q || '').trim();
+    const idNum = /^\d+$/.test(query) ? Number(query) : null;
     return Promise.all([
       this.prisma.user.findMany({
         where: {
@@ -501,9 +565,23 @@ export class ChatService {
         select: senderSelect,
       }),
       this.prisma.task.findMany({
-        where: query ? { title: { contains: query, mode: 'insensitive' } } : {},
-        take: 8,
-        select: { id: true, title: true, projectId: true },
+        where: query
+          ? {
+              OR: [
+                { title: { contains: query, mode: 'insensitive' } },
+                ...(idNum ? [{ id: idNum }] : []),
+              ],
+            }
+          : {},
+        take: 12,
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          projectId: true,
+          project: { select: { id: true, name: true } },
+        },
       }),
       this.prisma.project.findMany({
         where: {

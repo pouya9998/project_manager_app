@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useSettings } from '../lib/settings';
 import {
   detectInstallPlatform,
@@ -188,9 +189,9 @@ function InstallGuideModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/45 p-4 sm:items-center"
+      className="fixed inset-0 z-[200] flex items-end justify-center bg-black/45 p-4 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="pwa-install-title"
@@ -225,7 +226,9 @@ function InstallGuideModal({
         {platform === 'chromium' && !canNative && <DesktopSteps />}
 
         {hint && (
-          <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{hint}</div>
+          <div className="rounded-xl border border-amber-500/25 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+            {hint}
+          </div>
         )}
 
         <p className="text-xs leading-5 text-ink-faint">
@@ -233,7 +236,8 @@ function InstallGuideModal({
           دکمه نصب مستقیم را نشان می‌دهند.
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

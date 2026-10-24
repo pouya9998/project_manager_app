@@ -15,19 +15,40 @@ services:
       timeout: 5s
       retries: 10
 
+  livekit:
+    image: livekit/livekit-server:v1.8.4
+    container_name: pmo-livekit
+    restart: unless-stopped
+    # Host network: WebRTC UDP via docker-proxy is unreliable and mapping
+    # 50000-50100 spawns hundreds of proxies. --dev uses UDP 7882 only.
+    # Dev keys: API key "devkey", secret "secret".
+    network_mode: host
+    # Do not force node-ip=127.0.0.1 — UDP 7882 is not bound on loopback,
+    # so ICE candidates would be unreachable. Auto-detect picks a LAN IP.
+    command: --dev --bind 0.0.0.0
+
   backend:
     build: ./backend
     container_name: pmo-backend
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgresql://pmo:pmo@db:5432/pmo?schema=public
       JWT_SECRET: change-me-in-production-pmo-secret
       PORT: 3001
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
+      # livekit uses host network — reach via pmo_default bridge gateway
+      LIVEKIT_URL: http://172.26.0.1:7880
+      LIVEKIT_PUBLIC_URL: ws://localhost:7880
     volumes:
       - pmo_uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
+      livekit:
+        condition: service_started
     expose:
       - "3001"
 
@@ -35,8 +56,11 @@ services:
     build: ./frontend
     container_name: pmo-frontend
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - backend
+      - livekit
     ports:
       - "3080:80"
 

@@ -51,6 +51,7 @@ type ChatMessage = {
       votes: { userId: number; user: ChatUser }[];
     }[];
   } | null;
+  reactions?: { id: number; emoji: string; userId: number; user: ChatUser }[];
 };
 
 type Room = {
@@ -78,6 +79,7 @@ function replyPreview(msg: ChatMessage) {
 }
 
 const EMOJIS = ['😀', '😂', '😍', '👍', '👎', '❤️', '🔥', '🎉', '🙏', '👌', '😅', '🤔', '✅', '❌', '📌', '🚀'];
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏'];
 
 function formatTime(iso: string) {
   try {
@@ -115,50 +117,79 @@ function SeenBy({ message, mine }: { message: ChatMessage; mine: boolean }) {
 
 function renderContent(msg: ChatMessage) {
   if (!msg.content) return null;
-  let text = msg.content;
-  const parts: ReactNode[] = [];
-  const mentionRe = /@(کاربر|وظیفه|پروژه):([^\s]+)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  const linked = msg.mentions || [];
-
-  while ((m = mentionRe.exec(text))) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
-    const label = m[2];
-    const hit = linked.find((x) => x.label === label);
-    if (hit?.type === 'TASK') {
-      parts.push(
-        <Link key={`${m.index}-t`} to={`/tasks/${hit.refId}`} className="chat-mention">
-          @{label}
-        </Link>,
-      );
-    } else if (hit?.type === 'PROJECT') {
-      parts.push(
-        <Link key={`${m.index}-p`} to={`/projects/${hit.refId}`} className="chat-mention">
-          @{label}
-        </Link>,
-      );
-    } else {
-      parts.push(
-        <span key={`${m.index}-u`} className="chat-mention">
-          @{label}
-        </span>,
-      );
-    }
-    last = m.index + m[0].length;
+  const content = msg.content;
+  const linked = [...(msg.mentions || [])].sort((a, b) => b.label.length - a.label.length);
+  if (!linked.length) {
+    return <span className="whitespace-pre-wrap break-words">{content}</span>;
   }
-  if (!parts.length) {
-    // also match stored mentions without special prefix
-    for (const hit of linked) {
-      const token = `@${hit.label}`;
-      if (text.includes(token)) {
-        text = text.split(token).join(`«${token}»`);
+
+  const parts: ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  while (i < content.length) {
+    let best: { m: Mention; token: string } | null = null;
+    for (const m of linked) {
+      const token = `@${m.label}`;
+      if (content.startsWith(token, i) && (!best || token.length > best.token.length)) {
+        best = { m, token };
       }
     }
-    return <span className="whitespace-pre-wrap break-words">{msg.content}</span>;
+    if (best) {
+      if (best.m.type === 'TASK') {
+        parts.push(
+          <Link key={`m-${key++}`} to={`/tasks/${best.m.refId}`} className="chat-mention task">
+            #{best.m.refId} {best.m.label}
+          </Link>,
+        );
+      } else if (best.m.type === 'PROJECT') {
+        parts.push(
+          <Link key={`m-${key++}`} to={`/projects/${best.m.refId}`} className="chat-mention">
+            @{best.m.label}
+          </Link>,
+        );
+      } else {
+        parts.push(
+          <span key={`m-${key++}`} className="chat-mention">
+            @{best.m.label}
+          </span>,
+        );
+      }
+      i += best.token.length;
+      continue;
+    }
+    let j = i + 1;
+    while (j < content.length) {
+      let hit = false;
+      for (const m of linked) {
+        if (content.startsWith(`@${m.label}`, j)) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) break;
+      j += 1;
+    }
+    parts.push(content.slice(i, j));
+    i = j;
   }
-  if (last < text.length) parts.push(text.slice(last));
+
   return <span className="whitespace-pre-wrap break-words">{parts}</span>;
+}
+
+function TaskMentionCards({ mentions }: { mentions?: Mention[] }) {
+  const tasks = (mentions || []).filter((m) => m.type === 'TASK');
+  if (!tasks.length) return null;
+  return (
+    <div className="chat-task-cards">
+      {tasks.map((t) => (
+        <Link key={`task-card-${t.refId}`} to={`/tasks/${t.refId}`} className="chat-task-card">
+          <span className="chat-task-card-id">#{t.refId}</span>
+          <span className="chat-task-card-title">{t.label}</span>
+          <span className="chat-task-card-go">مشاهده</span>
+        </Link>
+      ))}
+    </div>
+  );
 }
 
 export default function ChatPage() {
@@ -185,6 +216,9 @@ export default function ChatPage() {
     projects: any[];
   }>({ users: [], tasks: [], projects: [] });
   const [pendingMentions, setPendingMentions] = useState<Mention[]>([]);
+  const [showTaskPicker, setShowTaskPicker] = useState(false);
+  const [taskPickerQ, setTaskPickerQ] = useState('');
+  const [taskPickerResults, setTaskPickerResults] = useState<any[]>([]);
   const [showNew, setShowNew] = useState<'group' | 'dm' | null>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [groupName, setGroupName] = useState('');
@@ -197,18 +231,83 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(!!activeRoomId);
   const [menuMsgId, setMenuMsgId] = useState<number | null>(null);
+  const [reactPickerId, setReactPickerId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [highlightId, setHighlightId] = useState<number | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const emojiPanelRef = useRef<HTMLDivElement>(null);
+  const emojiTriggerRef = useRef<HTMLButtonElement>(null);
+  const attachPanelRef = useRef<HTMLDivElement>(null);
+  const attachTriggerRef = useRef<HTMLButtonElement>(null);
   const messageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordStartedAt = useRef(0);
   const typingTimer = useRef<number | null>(null);
+
+  function closeComposerPanels() {
+    setShowEmoji(false);
+    setShowAttach(false);
+    setShowTaskPicker(false);
+  }
+
+  function closeMessageOverlays() {
+    setMenuMsgId(null);
+    setReactPickerId(null);
+  }
+
+  useEffect(() => {
+    if (
+      !showEmoji &&
+      !showAttach &&
+      !showTaskPicker &&
+      menuMsgId == null &&
+      reactPickerId == null
+    ) {
+      return;
+    }
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      closeComposerPanels();
+      closeMessageOverlays();
+    };
+
+    const onPointer = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (showEmoji) {
+        if (emojiPanelRef.current?.contains(t) || emojiTriggerRef.current?.contains(t)) {
+          /* keep open */
+        } else {
+          setShowEmoji(false);
+        }
+      }
+      if (showAttach) {
+        if (attachPanelRef.current?.contains(t) || attachTriggerRef.current?.contains(t)) {
+          /* keep open */
+        } else {
+          setShowAttach(false);
+        }
+      }
+      if (showTaskPicker) {
+        const panel = document.querySelector('.tg-panel.task-picker');
+        if (panel && !panel.contains(t)) setShowTaskPicker(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    const id = window.setTimeout(() => window.addEventListener('mousedown', onPointer), 0);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onPointer);
+    };
+  }, [showEmoji, showAttach, showTaskPicker, menuMsgId, reactPickerId]);
 
   async function loadRooms() {
     const list = await api<Room[]>('/chat/rooms');
@@ -224,6 +323,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     setMobileShowChat(!!activeRoomId);
+    closeComposerPanels();
+    closeMessageOverlays();
   }, [activeRoomId]);
 
   useEffect(() => {
@@ -371,6 +472,16 @@ export default function ChatPage() {
     return () => clearTimeout(t);
   }, [mentionQ, showMention]);
 
+  useEffect(() => {
+    if (!showTaskPicker) return;
+    const t = window.setTimeout(() => {
+      api<{ tasks: any[] }>(`/chat/mentions/search?q=${encodeURIComponent(taskPickerQ)}`)
+        .then((res) => setTaskPickerResults(res.tasks || []))
+        .catch(() => setTaskPickerResults([]));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [taskPickerQ, showTaskPicker]);
+
   function emitTyping(typing: boolean) {
     const socket = getChatSocket();
     if (!socket || !activeRoomId) return;
@@ -384,20 +495,60 @@ export default function ChatPage() {
     typingTimer.current = window.setTimeout(() => emitTyping(false), 1200);
 
     const at = value.lastIndexOf('@');
-    if (at >= 0 && (at === 0 || value[at - 1] === ' ')) {
-      setShowMention(true);
-      setMentionQ(value.slice(at + 1));
-    } else {
-      setShowMention(false);
+    if (at >= 0 && (at === 0 || /\s/.test(value[at - 1] || ''))) {
+      const q = value.slice(at + 1);
+      // completed mention has a space after the name — keep picker closed
+      if (q.length > 0 && !/[\s\n]/.test(q)) {
+        setShowMention(true);
+        setMentionQ(q);
+        return;
+      }
     }
+    setShowMention(false);
+    setMentionQ('');
   }
 
-  function insertMention(m: Mention, display: string) {
-    const at = text.lastIndexOf('@');
-    const next = (at >= 0 ? text.slice(0, at) : text) + `@${display} `;
+  function insertMention(m: Mention, display: string, replaceAt = true) {
+    let next: string;
+    if (replaceAt) {
+      const at = text.lastIndexOf('@');
+      next = (at >= 0 ? text.slice(0, at) : text) + `@${display} `;
+    } else {
+      const base = text.trim();
+      next = (base ? `${base} ` : '') + `@${display} `;
+    }
     setText(next);
-    setPendingMentions((prev) => [...prev.filter((x) => !(x.type === m.type && x.refId === m.refId)), m]);
+    setPendingMentions((prev) => [
+      ...prev.filter((x) => !(x.type === m.type && x.refId === m.refId)),
+      { ...m, label: display },
+    ]);
     setShowMention(false);
+    setMentionQ('');
+    setMentionResults({ users: [], tasks: [], projects: [] });
+    setShowTaskPicker(false);
+    setTaskPickerQ('');
+    window.requestAnimationFrame(() => {
+      const el = composerInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = next.length;
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    });
+  }
+
+  function referTask(task: { id: number; title: string }) {
+    insertMention({ type: 'TASK', refId: task.id, label: task.title }, task.title, false);
+  }
+
+  function focusComposer() {
+    window.requestAnimationFrame(() => {
+      const el = composerInputRef.current;
+      if (!el) return;
+      el.focus();
+      const len = el.value.length;
+      el.selectionStart = el.selectionEnd = len;
+    });
   }
 
   async function sendFormData(fd: FormData) {
@@ -413,6 +564,8 @@ export default function ChatPage() {
       setText('');
       setReplyTo(null);
       setPendingMentions([]);
+      setShowMention(false);
+      setMentionQ('');
       setShowEmoji(false);
       setShowPoll(false);
       setPollQ('');
@@ -568,7 +721,27 @@ export default function ChatPage() {
   function startReply(msg: ChatMessage) {
     setReplyTo(msg);
     setMenuMsgId(null);
+    setReactPickerId(null);
     setEditingId(null);
+    focusComposer();
+  }
+
+  useEffect(() => {
+    if (replyTo) focusComposer();
+  }, [replyTo?.id]);
+
+  async function toggleReaction(messageId: number, emoji: string) {
+    try {
+      const updated = await api<ChatMessage>(`/chat/messages/${messageId}/reactions`, {
+        method: 'POST',
+        body: { emoji } as any,
+      });
+      setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      setReactPickerId(null);
+      setMenuMsgId(null);
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   function startEdit(msg: ChatMessage) {
@@ -719,7 +892,10 @@ export default function ChatPage() {
 
             <div
               className="chat-messages flex-1 overflow-y-auto px-3 py-4"
-              onClick={() => setMenuMsgId(null)}
+              onClick={() => {
+                closeMessageOverlays();
+                closeComposerPanels();
+              }}
             >
               {messages.map((msg, idx) => {
                 const mine = msg.sender.id === user?.id;
@@ -821,6 +997,7 @@ export default function ChatPage() {
                         ) : (
                           <>
                             {msg.type === 'TEXT' && renderContent(msg)}
+                            <TaskMentionCards mentions={msg.mentions} />
                             {(msg.type === 'IMAGE' || isImageFile) && msg.storedName && (
                               <div className="tg-image-wrap">
                                 <ChatImage
@@ -871,7 +1048,7 @@ export default function ChatPage() {
                                       className={`relative w-full overflow-hidden rounded-lg border px-2 py-1.5 text-right text-sm ${
                                         voted
                                           ? 'border-[color:var(--brand)] bg-[color:var(--brand-soft)]'
-                                          : 'border-line bg-white/60'
+                                          : 'border-line bg-surface/60'
                                       }`}
                                     >
                                       <span
@@ -900,6 +1077,7 @@ export default function ChatPage() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setMenuMsgId((id) => (id === msg.id ? null : msg.id));
+                                setReactPickerId(null);
                               }}
                             >
                               ⋯
@@ -911,6 +1089,35 @@ export default function ChatPage() {
                             </div>
                           </div>
                         )}
+
+                        {!!msg.reactions?.length && (
+                          <div className="tg-reactions">
+                            {Object.entries(
+                              msg.reactions.reduce(
+                                (acc, r) => {
+                                  if (!acc[r.emoji]) acc[r.emoji] = { count: 0, mine: false };
+                                  acc[r.emoji].count += 1;
+                                  if (r.userId === user?.id) acc[r.emoji].mine = true;
+                                  return acc;
+                                },
+                                {} as Record<string, { count: number; mine: boolean }>,
+                              ),
+                            ).map(([emoji, info]) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                className={`tg-reaction-pill ${info.mine ? 'mine' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleReaction(msg.id, emoji);
+                                }}
+                              >
+                                <span>{emoji}</span>
+                                <span>{info.count}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         <SeenBy mine={mine} message={msg} />
                       </div>
 
@@ -919,8 +1126,28 @@ export default function ChatPage() {
                           className={`tg-msg-menu ${mine ? 'mine' : 'theirs'}`}
                           onClick={(e) => e.stopPropagation()}
                         >
+                          <div className="tg-react-picker">
+                            {REACTIONS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => toggleReaction(msg.id, emoji)}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
                           <button type="button" onClick={() => startReply(msg)}>
                             پاسخ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReactPickerId(msg.id);
+                              setMenuMsgId(null);
+                            }}
+                          >
+                            واکنش بیشتر
                           </button>
                           {mine && msg.type === 'TEXT' && (
                             <button type="button" onClick={() => startEdit(msg)}>
@@ -932,6 +1159,36 @@ export default function ChatPage() {
                               حذف
                             </button>
                           )}
+                        </div>
+                      )}
+
+                      {reactPickerId === msg.id && (
+                        <div
+                          className={`tg-msg-menu ${mine ? 'mine' : 'theirs'}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="tg-panel-head px-2">
+                            <span className="text-xs font-bold text-ink-soft">واکنش</span>
+                            <button
+                              type="button"
+                              className="tg-panel-close"
+                              aria-label="بستن"
+                              onClick={() => setReactPickerId(null)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div className="tg-react-picker">
+                            {EMOJIS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => toggleReaction(msg.id, emoji)}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -999,24 +1256,37 @@ export default function ChatPage() {
               />
 
               {showEmoji && (
-                <div className="tg-panel emoji">
-                  {EMOJIS.map((e) => (
+                <div ref={emojiPanelRef} className="tg-panel emoji" role="dialog" aria-label="ایموجی">
+                  <div className="tg-panel-head">
+                    <span>ایموجی</span>
                     <button
-                      key={e}
                       type="button"
-                      className="tg-emoji-btn"
-                      onClick={() => {
-                        setText((t) => t + e);
-                      }}
+                      className="tg-panel-close"
+                      aria-label="بستن"
+                      onClick={() => setShowEmoji(false)}
                     >
-                      {e}
+                      ✕
                     </button>
-                  ))}
+                  </div>
+                  <div className="tg-emoji-grid">
+                    {EMOJIS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        className="tg-emoji-btn"
+                        onClick={() => {
+                          setText((t) => t + e);
+                        }}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               {showAttach && (
-                <div className="tg-panel attach">
+                <div ref={attachPanelRef} className="tg-panel attach">
                   <button
                     type="button"
                     className="tg-attach-item"
@@ -1051,6 +1321,72 @@ export default function ChatPage() {
                     <span className="tg-attach-ico poll">📊</span>
                     <span>نظرسنجی</span>
                   </button>
+                  <button
+                    type="button"
+                    className="tg-attach-item"
+                    onClick={() => {
+                      setShowAttach(false);
+                      setShowEmoji(false);
+                      setShowMention(false);
+                      setShowTaskPicker(true);
+                      setTaskPickerQ('');
+                    }}
+                  >
+                    <span className="tg-attach-ico task">✅</span>
+                    <span>ارجاع به وظیفه</span>
+                  </button>
+                </div>
+              )}
+
+              {showTaskPicker && (
+                <div className="tg-panel mention task-picker" role="dialog" aria-label="ارجاع وظیفه">
+                  <div className="tg-panel-head">
+                    <span>ارجاع به وظیفه</span>
+                    <button
+                      type="button"
+                      className="tg-panel-close"
+                      aria-label="بستن"
+                      onClick={() => setShowTaskPicker(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <input
+                    className="input mb-2"
+                    placeholder="جستجوی عنوان یا شماره وظیفه..."
+                    value={taskPickerQ}
+                    autoFocus
+                    onChange={(e) => setTaskPickerQ(e.target.value)}
+                  />
+                  <div className="max-h-52 overflow-y-auto">
+                    {taskPickerResults.length === 0 ? (
+                      <div className="px-2 py-3 text-center text-xs text-ink-mute">
+                        وظیفه‌ای پیدا نشد
+                      </div>
+                    ) : (
+                      taskPickerResults.map((t) => (
+                        <button
+                          key={`pick-t-${t.id}`}
+                          type="button"
+                          className="tg-mention-item task-pick"
+                          onClick={() => referTask(t)}
+                        >
+                          <span className="chat-task-card-id">#{t.id}</span>
+                          <span className="min-w-0 flex-1 text-right">
+                            <span className="block truncate font-semibold">{t.title}</span>
+                            {t.project?.name && (
+                              <span className="block truncate text-[11px] text-ink-mute">
+                                {t.project.name}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <p className="mt-1 px-1 text-[10px] text-ink-faint">
+                    یا در متن پیام با @ عنوان وظیفه را بنویسید
+                  </p>
                 </div>
               )}
 
@@ -1076,12 +1412,15 @@ export default function ChatPage() {
                     <button
                       key={`t-${t.id}`}
                       type="button"
-                      className="tg-mention-item"
+                      className="tg-mention-item task-pick"
                       onClick={() =>
                         insertMention({ type: 'TASK', refId: t.id, label: t.title }, t.title)
                       }
                     >
-                      ✅ وظیفه: {t.title}
+                      <span className="chat-task-card-id">#{t.id}</span>
+                      <span className="min-w-0 flex-1 truncate text-right">
+                        وظیفه: {t.title}
+                      </span>
                     </button>
                   ))}
                   {mentionResults.projects.map((p) => (
@@ -1096,6 +1435,30 @@ export default function ChatPage() {
                       📁 پروژه: {p.name}
                     </button>
                   ))}
+                </div>
+              )}
+
+              {!!pendingMentions.filter((m) => m.type === 'TASK').length && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {pendingMentions
+                    .filter((m) => m.type === 'TASK')
+                    .map((m) => (
+                      <span key={`pend-${m.refId}`} className="chat-task-pending">
+                        <span className="chat-task-card-id">#{m.refId}</span>
+                        <span className="truncate">{m.label}</span>
+                        <button
+                          type="button"
+                          aria-label="حذف ارجاع"
+                          onClick={() =>
+                            setPendingMentions((prev) =>
+                              prev.filter((x) => !(x.type === 'TASK' && x.refId === m.refId)),
+                            )
+                          }
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
                 </div>
               )}
 
@@ -1156,14 +1519,17 @@ export default function ChatPage() {
                   onSubmit={(e) => {
                     setShowEmoji(false);
                     setShowAttach(false);
+                    setShowTaskPicker(false);
                     return sendText(e);
                   }}
                   className="tg-composer-row"
                 >
                   <button
+                    ref={attachTriggerRef}
                     type="button"
                     className={`tg-round-btn attach ${showAttach ? 'active' : ''}`}
                     aria-label="پیوست"
+                    aria-expanded={showAttach}
                     onClick={() => {
                       setShowAttach((v) => !v);
                       setShowEmoji(false);
@@ -1181,9 +1547,11 @@ export default function ChatPage() {
 
                   <div className="tg-input-shell">
                     <button
+                      ref={emojiTriggerRef}
                       type="button"
                       className="tg-emoji-trigger"
                       aria-label="ایموجی"
+                      aria-expanded={showEmoji}
                       onClick={() => {
                         setShowEmoji((v) => !v);
                         setShowAttach(false);
@@ -1202,6 +1570,7 @@ export default function ChatPage() {
                       </svg>
                     </button>
                     <textarea
+                      ref={composerInputRef}
                       className="tg-input"
                       rows={1}
                       placeholder="پیام بنویسید..."

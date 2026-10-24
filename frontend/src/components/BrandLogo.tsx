@@ -22,7 +22,7 @@ export default function BrandLogo({ size = 'md', className = '' }: Props) {
       <img
         src={uploadsUrl(`branding/${settings.logoFile}`)}
         alt={settings.appName}
-        className={`${box} rounded-xl object-contain bg-white ${className}`}
+        className={`${box} rounded-xl object-contain bg-surface ${className}`}
       />
     );
   }

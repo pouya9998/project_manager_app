@@ -9,11 +9,11 @@ export const taskStatusLabel: Record<string, string> = {
 
 export const taskStatusColor: Record<string, string> = {
   BACKLOG: 'bg-surface-soft text-ink-soft',
-  TODO: 'bg-sky-50 text-sky-800',
-  IN_PROGRESS: 'bg-amber-50 text-amber-800',
-  IN_REVIEW: 'bg-indigo-50 text-indigo-800',
-  DONE: 'bg-brand-soft text-brand-dark',
-  CANCELLED: 'bg-rose-50 text-rose-700',
+  TODO: 'bg-sky-50 text-sky-800 dark:bg-sky-400/15 dark:text-sky-300',
+  IN_PROGRESS: 'bg-amber-50 text-amber-800 dark:bg-amber-400/15 dark:text-amber-300',
+  IN_REVIEW: 'bg-indigo-50 text-indigo-800 dark:bg-indigo-400/15 dark:text-indigo-300',
+  DONE: 'bg-brand-soft text-[color:var(--brand-fg)]',
+  CANCELLED: 'bg-rose-50 text-rose-700 dark:bg-rose-400/15 dark:text-rose-300',
 };
 
 export const effortStatusLabel: Record<string, string> = {
