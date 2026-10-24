@@ -41,11 +41,13 @@ export class TasksController {
     @CurrentUser() user: { id: number; role: Role },
     @Query('status') status?: TaskStatus,
     @Query('projectId') projectId?: string,
+    @Query('q') q?: string,
   ) {
     return this.tasks.findAll(
       user,
       status,
       projectId ? Number(projectId) : undefined,
+      q,
     );
   }
 

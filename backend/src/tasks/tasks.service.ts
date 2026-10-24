@@ -92,17 +92,34 @@ export class TasksService {
     user: { id: number; role: Role },
     status?: TaskStatus,
     projectId?: number,
+    q?: string,
   ) {
-    const where: any = {};
-    if (status) where.status = status;
-    if (projectId) where.projectId = projectId;
-    if (user.role !== Role.ADMIN) {
-      where.assignees = { some: { userId: user.id } };
+    const and: any[] = [];
+    if (status) and.push({ status });
+    if (projectId) and.push({ projectId });
+
+    const query = (q || '').trim();
+    if (query) {
+      const idNum = Number(query.replace(/^#/, ''));
+      and.push({
+        OR: [
+          { title: { contains: query, mode: 'insensitive' } },
+          ...(Number.isFinite(idNum) && idNum > 0 ? [{ id: idNum }] : []),
+        ],
+      });
     }
+
+    if (user.role !== Role.ADMIN) {
+      and.push({
+        OR: [{ assignees: { some: { userId: user.id } } }, { creatorId: user.id }],
+      });
+    }
+
     return this.prisma.task.findMany({
-      where,
+      where: and.length ? { AND: and } : {},
       include: taskInclude,
       orderBy: [{ priority: 'asc' }, { updatedAt: 'desc' }],
+      take: query ? 20 : undefined,
     });
   }
 
@@ -144,7 +161,10 @@ export class TasksService {
       orderBy: { sortOrder: 'asc' },
     });
 
-    const assigneeIds = [...new Set([...(dto.assigneeIds || []), creatorId])];
+    const assigneeIds = [...new Set((dto.assigneeIds || []).map(Number).filter((id) => id > 0))];
+    if (!assigneeIds.length) {
+      throw new BadRequestException('حداقل یک مسئول برای وظیفه انتخاب کنید');
+    }
 
     const task = await this.prisma.task.create({
       data: {

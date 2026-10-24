@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { formatDate } from '../lib/labels';
 
 export default function GitlabSettingsPage() {
   const [form, setForm] = useState({ name: 'پیش‌فرض', baseUrl: '', accessToken: '' });
@@ -105,13 +106,13 @@ export default function GitlabSettingsPage() {
           <div>
             <div className="text-xs text-ink-mute">آخرین بررسی</div>
             <div className="mt-1 text-sm text-ink">
-              {config.lastHealthAt ? new Date(config.lastHealthAt).toLocaleString('fa-IR') : '—'}
+              {config.lastHealthAt ? formatDate(config.lastHealthAt) : '—'}
             </div>
           </div>
           <div>
             <div className="text-xs text-ink-mute">آخرین همگام‌سازی</div>
             <div className="mt-1 text-sm text-ink">
-              {config.lastSyncAt ? new Date(config.lastSyncAt).toLocaleString('fa-IR') : '—'}
+              {config.lastSyncAt ? formatDate(config.lastSyncAt) : '—'}
             </div>
           </div>
           {config.lastHealthError && (
@@ -183,9 +184,7 @@ export default function GitlabSettingsPage() {
                   <div className="font-medium text-ink">{p.name}</div>
                   <div className="text-xs text-ink-mute">
                     {p.gitlabPath || '—'}
-                    {p.lastGitlabSyncAt
-                      ? ` · آخرین sync: ${new Date(p.lastGitlabSyncAt).toLocaleString('fa-IR')}`
-                      : ''}
+                    {p.lastGitlabSyncAt ? ` · آخرین sync: ${formatDate(p.lastGitlabSyncAt)}` : ''}
                   </div>
                   {p.lastGitlabSyncError && (
                     <div className="text-xs text-red-600">{p.lastGitlabSyncError}</div>

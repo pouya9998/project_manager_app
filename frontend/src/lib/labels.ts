@@ -30,15 +30,45 @@ export const roleLabel: Record<string, string> = {
 
 export const taskStatuses = Object.keys(taskStatusLabel);
 
+/** Jira-like link types (from current task → other task) */
+export const taskLinkTypeLabel: Record<string, string> = {
+  BLOCKS: 'مسدود می‌کند',
+  BLOCKED_BY: 'مسدود شده توسط',
+  RELATES_TO: 'مرتبط است با',
+  DUPLICATES: 'تکراری از',
+  IS_DUPLICATED_BY: 'تکرار شده توسط',
+};
+
+export const taskLinkTypes = Object.keys(taskLinkTypeLabel);
+
+/** How the link reads when viewing from the "to" side */
+export const taskLinkTypeInverseLabel: Record<string, string> = {
+  BLOCKS: 'مسدود شده توسط',
+  BLOCKED_BY: 'مسدود می‌کند',
+  RELATES_TO: 'مرتبط است با',
+  DUPLICATES: 'تکرار شده توسط',
+  IS_DUPLICATED_BY: 'تکراری از',
+};
+
+const jalaliDateTime = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'Asia/Tehran',
+});
+
+const jalaliDate = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'Asia/Tehran',
+});
+
 export function formatDate(value?: string | null) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('fa-IR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value));
+  return jalaliDateTime.format(new Date(value));
 }
 
 export function formatDateOnly(value?: string | null) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' }).format(new Date(value));
+  return jalaliDate.format(new Date(value));
 }

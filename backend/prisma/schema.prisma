@@ -143,6 +143,9 @@ enum DeploymentStatus {
 enum TaskDependencyType {
   BLOCKS
   BLOCKED_BY
+  RELATES_TO
+  DUPLICATES
+  IS_DUPLICATED_BY
 }
 
 model AppSettings {

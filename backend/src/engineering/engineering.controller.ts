@@ -47,15 +47,16 @@ export class EngineeringController {
   }
 
   @Post('tasks/dependencies')
-  @Roles(Role.ADMIN)
   addDep(@Body() dto: CreateDepDto, @CurrentUser() user: { id: number; role: Role }) {
     return this.engineering.addDependency(dto.fromTaskId, dto.toTaskId, dto.type, user);
   }
 
   @Delete('tasks/dependencies/:id')
-  @Roles(Role.ADMIN)
-  removeDep(@Param('id', ParseIntPipe) id: number) {
-    return this.engineering.removeDependency(id);
+  removeDep(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: { id: number; role: Role },
+  ) {
+    return this.engineering.removeDependency(id, user);
   }
 
   @Get('engineering/dashboard')

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api, uploadsUrl } from './api';
+import { applyPwaBranding } from './pwa-branding';
 import { applyBrandTheme, applyFavicon } from './theme';
 
 export type AppSettings = {
@@ -33,6 +34,7 @@ function applySettingsSideEffects(s: AppSettings) {
   applyBrandTheme(s.primaryColor);
   applyFavicon(s.faviconFile ? uploadsUrl(`branding/${s.faviconFile}`) : null);
   if (s.appName) document.title = s.appName;
+  void applyPwaBranding(s);
 }
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {

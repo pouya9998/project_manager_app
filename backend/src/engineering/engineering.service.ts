@@ -55,6 +55,15 @@ export class EngineeringService {
     });
   }
 
+  private canManageLinks(
+    task: { creatorId: number; assignees: { userId: number }[] },
+    user: { id: number; role: Role },
+  ) {
+    if (user.role === Role.ADMIN) return true;
+    if (task.creatorId === user.id) return true;
+    return task.assignees.some((a) => a.userId === user.id);
+  }
+
   async addDependency(
     fromTaskId: number,
     toTaskId: number,
@@ -65,51 +74,55 @@ export class EngineeringService {
       throw new BadRequestException('وظیفه نمی‌تواند به خودش وابسته باشد');
     }
     const [from, to] = await Promise.all([
-      this.prisma.task.findUnique({ where: { id: fromTaskId }, include: { project: true } }),
-      this.prisma.task.findUnique({ where: { id: toTaskId }, include: { project: true } }),
+      this.prisma.task.findUnique({
+        where: { id: fromTaskId },
+        include: { project: true, assignees: true },
+      }),
+      this.prisma.task.findUnique({
+        where: { id: toTaskId },
+        include: { project: true, assignees: true },
+      }),
     ]);
     if (!from || !to) throw new NotFoundException('وظیفه یافت نشد');
-    if (from.project?.type !== ProjectType.SOFTWARE || to.project?.type !== ProjectType.SOFTWARE) {
-      throw new ForbiddenException('وابستگی فقط برای پروژه‌های نرم‌افزاری است');
-    }
-    if (from.projectId !== to.projectId) {
-      throw new BadRequestException('وابستگی فقط داخل یک پروژه مجاز است');
+    if (!this.canManageLinks(from, user)) {
+      throw new ForbiddenException('اجازهٔ ایجاد ارتباط برای این وظیفه را ندارید');
     }
 
-    // cycle detection on BLOCKS graph
-    if (await this.wouldCreateCycle(fromTaskId, toTaskId, type)) {
+    // cycle detection only for blocking graph
+    if (
+      (type === TaskDependencyType.BLOCKS || type === TaskDependencyType.BLOCKED_BY) &&
+      (await this.wouldCreateCycle(fromTaskId, toTaskId, type))
+    ) {
       throw new BadRequestException('این وابستگی باعث ایجاد حلقه می‌شود');
     }
 
     const dep = await this.prisma.taskDependency.create({
       data: { fromTaskId, toTaskId, type },
       include: {
-        fromTask: { select: { id: true, title: true } },
-        toTask: { select: { id: true, title: true } },
+        fromTask: { select: { id: true, title: true, status: true } },
+        toTask: { select: { id: true, title: true, status: true } },
       },
     });
 
-    await this.gitlab.recordEvent({
-      taskId: fromTaskId,
-      projectId: from.projectId,
-      type: EngineeringEventType.TASK_UPDATED,
-      source: EngineeringEventSource.INTERNAL,
-      externalId: `dep:${dep.id}`,
-      title: `وابستگی ${type}: #${toTaskId}`,
-      actorName: String(user.id),
-    });
+    if (from.project?.type === ProjectType.SOFTWARE) {
+      await this.gitlab.recordEvent({
+        taskId: fromTaskId,
+        projectId: from.projectId,
+        type: EngineeringEventType.TASK_UPDATED,
+        source: EngineeringEventSource.INTERNAL,
+        externalId: `dep:${dep.id}`,
+        title: `ارتباط ${type}: #${toTaskId}`,
+        actorName: String(user.id),
+      });
+    }
 
-    const blockers = await this.prisma.task.findUnique({
-      where: { id: toTaskId },
-      include: { assignees: true },
-    });
-    if (blockers && type === TaskDependencyType.BLOCKS) {
+    if (type === TaskDependencyType.BLOCKS) {
       await this.notifications.notifyUsers(
-        blockers.assignees.map((a) => a.userId),
+        to.assignees.map((a) => a.userId),
         {
           type: AppNotificationType.TASK_BLOCKED,
           title: 'مسدود شدن وظیفه',
-          body: `وظیفه «${blockers.title}» توسط #${fromTaskId} مسدود شد`,
+          body: `وظیفه «${to.title}» توسط #${fromTaskId} مسدود شد`,
           link: `/tasks/${toTaskId}`,
         },
       );
@@ -118,7 +131,17 @@ export class EngineeringService {
     return dep;
   }
 
-  async removeDependency(id: number) {
+  async removeDependency(id: number, user: { id: number; role: Role }) {
+    const dep = await this.prisma.taskDependency.findUnique({
+      where: { id },
+      include: {
+        fromTask: { include: { assignees: true } },
+      },
+    });
+    if (!dep) throw new NotFoundException('ارتباط یافت نشد');
+    if (!this.canManageLinks(dep.fromTask, user)) {
+      throw new ForbiddenException('اجازهٔ حذف این ارتباط را ندارید');
+    }
     await this.prisma.taskDependency.delete({ where: { id } });
     return { ok: true };
   }

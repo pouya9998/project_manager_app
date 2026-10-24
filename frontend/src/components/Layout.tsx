@@ -249,6 +249,8 @@ export default function Layout() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const isChat = location.pathname.startsWith('/chat');
+  /** Hide mobile tabbar only inside a room — keep it on the chat list */
+  const isChatRoom = /^\/chat\/\d+/.test(location.pathname);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -298,7 +300,11 @@ export default function Layout() {
   }
 
   return (
-    <div className={`bg-surface-muted ${isChat ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'}`}>
+    <div
+      className={`bg-surface-muted ${
+        isChatRoom ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
+      }`}
+    >
       <header className="sticky top-0 z-40 shrink-0 border-b border-line bg-surface/95 backdrop-blur md:hidden">
         <div className="flex h-14 items-center justify-between gap-3 px-4">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -377,9 +383,11 @@ export default function Layout() {
 
       <div
         className={`mx-auto flex max-w-[1440px] ${
-          isChat
+          isChatRoom
             ? 'h-[calc(100dvh-3.5rem)] min-h-0 md:h-[100dvh]'
-            : 'min-h-[calc(100vh-3.5rem)] md:min-h-screen'
+            : isChat
+              ? 'h-[calc(100dvh-3.5rem)] min-h-0 md:min-h-screen'
+              : 'min-h-[calc(100vh-3.5rem)] md:min-h-screen'
         }`}
       >
         <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 flex-col border-l border-line bg-surface px-4 py-5 md:flex">
@@ -414,16 +422,18 @@ export default function Layout() {
 
         <main
           className={`min-w-0 flex-1 ${
-            isChat
+            isChatRoom
               ? 'flex min-h-0 flex-col p-0'
-              : 'p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:p-6 md:pb-6 lg:p-8'
+              : isChat
+                ? 'flex min-h-0 flex-col p-0 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0'
+                : 'p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:p-6 md:pb-6 lg:p-8'
           }`}
         >
           <Outlet />
         </main>
       </div>
 
-      {!isChat && (
+      {!isChatRoom && (
         <nav className="mobile-tabbar md:hidden" aria-label="منوی پایین">
           <div className="mobile-tabbar-inner">
             {mobileLinks.map((l) => (

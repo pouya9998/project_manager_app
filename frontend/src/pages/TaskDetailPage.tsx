@@ -2,11 +2,13 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import CommentBox from '../components/CommentBox';
 import CompleteSoftwareTaskModal from '../components/CompleteSoftwareTaskModal';
+import TaskLinksPanel from '../components/TaskLinksPanel';
 import { api, uploadsUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   effortStatusLabel,
   formatDate,
+  formatDateOnly,
   taskStatusColor,
   taskStatusLabel,
   taskStatuses,
@@ -20,7 +22,6 @@ export default function TaskDetailPage() {
   const [mrs, setMrs] = useState<any[]>([]);
   const [timeline, setTimeline] = useState<any[]>([]);
   const [deps, setDeps] = useState<any[]>([]);
-  const [depTo, setDepTo] = useState('');
   const [hours, setHours] = useState('1');
   const [effortDesc, setEffortDesc] = useState('');
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -105,7 +106,6 @@ export default function TaskDetailPage() {
     }
   }
 
-
   async function linkCommit(c: any) {
     await api(`/tasks/${id}/commits`, {
       method: 'POST',
@@ -138,20 +138,24 @@ export default function TaskDetailPage() {
   }
 
   if (!task) {
-    return <div className="panel p-8 text-ink-mute">{error || 'در حال بارگذاری...'}</div>;
+    return <div className="panel p-6 text-ink-mute sm:p-8">{error || 'در حال بارگذاری...'}</div>;
   }
 
-  const assigned = task.assignees?.some((a: any) => a.userId === user?.id || a.user?.id === user?.id);
+  const assigned = task.assignees?.some(
+    (a: any) => a.userId === user?.id || a.user?.id === user?.id,
+  );
+  const canEditLinks =
+    isAdmin || assigned || task.creatorId === user?.id || task.creator?.id === user?.id;
 
   return (
-    <div className="space-y-5">
-      <Link to="/board" className="text-sm text-brand hover:underline">
+    <div className="mx-auto w-full max-w-5xl space-y-4 overflow-x-hidden sm:space-y-5">
+      <Link to="/board" className="inline-flex text-sm text-brand hover:underline">
         ← بازگشت به تابلو
       </Link>
 
-      <header className="panel p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+      <header className="panel p-4 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             {task.step ? (
               <div
                 className="chip text-white"
@@ -160,11 +164,17 @@ export default function TaskDetailPage() {
                 {task.step.title}
               </div>
             ) : (
-              <div className={`chip ${taskStatusColor[task.status]}`}>{taskStatusLabel[task.status]}</div>
+              <div className={`chip ${taskStatusColor[task.status]}`}>
+                {taskStatusLabel[task.status]}
+              </div>
             )}
-            <h2 className="mt-3 font-display text-3xl font-bold text-ink">{task.title}</h2>
-            <p className="mt-2 whitespace-pre-wrap text-ink-soft">{task.description || 'بدون توضیحات'}</p>
-            <div className="mt-4 flex flex-wrap gap-3 text-sm text-ink-mute">
+            <h2 className="mt-3 break-words font-display text-xl font-bold leading-snug text-ink sm:text-3xl">
+              <span className="text-ink-mute">#{task.id}</span> {task.title}
+            </h2>
+            <p className="mt-2 whitespace-pre-wrap break-words text-sm text-ink-soft sm:text-base">
+              {task.description || 'بدون توضیحات'}
+            </p>
+            <div className="mt-4 flex flex-col gap-1.5 text-sm text-ink-mute sm:flex-row sm:flex-wrap sm:gap-3">
               <span>
                 پروژه:{' '}
                 {task.project ? (
@@ -176,13 +186,13 @@ export default function TaskDetailPage() {
                 )}
               </span>
               <span>ایجادکننده: {task.creator?.fullName}</span>
-              <span>مهلت: {formatDate(task.dueDate)}</span>
+              <span>مهلت: {formatDateOnly(task.dueDate)}</span>
             </div>
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="w-full shrink-0 sm:w-auto sm:min-w-[11rem]">
             {task.project?.steps?.length ? (
               <select
-                className="input w-auto"
+                className="input w-full"
                 value={task.stepId || ''}
                 onChange={(e) => changeStep(Number(e.target.value))}
               >
@@ -197,7 +207,7 @@ export default function TaskDetailPage() {
               </select>
             ) : (
               <select
-                className="input w-auto"
+                className="input w-full"
                 value={task.status}
                 onChange={(e) => changeStatus(e.target.value)}
               >
@@ -211,14 +221,18 @@ export default function TaskDetailPage() {
           </div>
         </div>
         {(msg || error) && (
-          <div className={`mt-4 rounded-xl px-3 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+          <div
+            className={`mt-4 rounded-xl px-3 py-2 text-sm ${
+              error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
+            }`}
+          >
             {error || msg}
           </div>
         )}
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="panel p-5">
+      <div className="grid gap-4 sm:gap-5 lg:grid-cols-2">
+        <section className="panel p-4 sm:p-5">
           <h3 className="font-bold text-ink">مسئولان و فایل‌ها</h3>
           <div className="mt-3 flex flex-wrap gap-2">
             {task.assignees.map((a: any) => (
@@ -227,13 +241,16 @@ export default function TaskDetailPage() {
                 {a.user.jobPosition ? ` · ${a.user.jobPosition.title}` : ''}
               </span>
             ))}
+            {!task.assignees?.length && (
+              <span className="text-sm text-ink-faint">بدون مسئول</span>
+            )}
           </div>
           <div className="mt-4 space-y-2">
             {task.attachments?.length ? (
               task.attachments.map((f: any) => (
                 <a
                   key={f.id}
-                  className="block rounded-xl bg-surface-muted px-3 py-2 text-sm text-brand hover:bg-surface-soft"
+                  className="block truncate rounded-xl bg-surface-muted px-3 py-2 text-sm text-brand hover:bg-surface-soft"
                   href={uploadsUrl(f.storedName)}
                   target="_blank"
                   rel="noreferrer"
@@ -247,8 +264,17 @@ export default function TaskDetailPage() {
           </div>
         </section>
 
+        <div className="lg:col-span-1">
+          <TaskLinksPanel
+            taskId={Number(id)}
+            canEdit={canEditLinks}
+            deps={deps}
+            onChanged={load}
+          />
+        </div>
+
         {(assigned || isAdmin) && !isSoftware && (
-          <section className="panel p-5">
+          <section className="panel p-4 sm:p-5">
             <h3 className="font-bold text-ink">ثبت زمان (ساعت)</h3>
             <form onSubmit={addEffort} className="mt-3 space-y-3">
               <div>
@@ -271,19 +297,23 @@ export default function TaskDetailPage() {
                   onChange={(e) => setEffortDesc(e.target.value)}
                 />
               </div>
-              <button className="btn-primary">ثبت برای تأیید ادمین</button>
+              <button className="btn-primary w-full sm:w-auto">ثبت برای تأیید ادمین</button>
             </form>
           </section>
         )}
 
         {(assigned || isAdmin) && isSoftware && task.status !== 'DONE' && (
-          <section className="panel p-5 lg:col-span-2">
+          <section className="panel p-4 sm:p-5 lg:col-span-2">
             <h3 className="font-bold text-ink">اتمام وظیفه و ثبت زمان</h3>
             <p className="mt-1 text-sm text-ink-mute">
               برای انجام‌شده کردن این وظیفه، باید یک MR متصل را انتخاب و ساعت کار را وارد کنید.
               ادمین بعداً ادعا را با توجه به تغییرات کد تأیید یا اصلاح می‌کند.
             </p>
-            <button type="button" className="btn-primary mt-3" onClick={() => setCompleteOpen(true)}>
+            <button
+              type="button"
+              className="btn-primary mt-3 w-full sm:w-auto"
+              onClick={() => setCompleteOpen(true)}
+            >
               تکمیل با انتخاب MR و زمان
             </button>
             {!task.mergeRequests?.length && (
@@ -296,7 +326,7 @@ export default function TaskDetailPage() {
 
         {isSoftware && (
           <>
-            <section className="panel p-5 lg:col-span-2">
+            <section className="panel p-4 sm:p-5 lg:col-span-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="font-bold text-ink">خط زمانی مهندسی</h3>
                 {task.project?.gitlabProjectId && (
@@ -308,7 +338,7 @@ export default function TaskDetailPage() {
               <div className="mt-3 max-h-64 space-y-2 overflow-auto">
                 {timeline.map((ev) => (
                   <div key={ev.id} className="rounded-xl bg-surface-muted px-3 py-2 text-sm">
-                    <div className="font-medium text-ink">{ev.title}</div>
+                    <div className="break-words font-medium text-ink">{ev.title}</div>
                     <div className="text-xs text-ink-mute">
                       {ev.type} · {ev.source} · {formatDate(ev.occurredAt)}
                       {ev.webUrl && (
@@ -323,12 +353,14 @@ export default function TaskDetailPage() {
                   </div>
                 ))}
                 {!timeline.length && (
-                  <div className="text-sm text-ink-faint">رویدادی ثبت نشده — همگام‌سازی یا لینک دستی انجام دهید</div>
+                  <div className="text-sm text-ink-faint">
+                    رویدادی ثبت نشده — همگام‌سازی یا لینک دستی انجام دهید
+                  </div>
                 )}
               </div>
             </section>
 
-            <section className="panel p-5">
+            <section className="panel p-4 sm:p-5">
               <h3 className="font-bold text-ink">کامیت‌های متصل (همگام‌شده)</h3>
               <div className="mt-3 space-y-2">
                 {task.commits?.map((c: any) => (
@@ -339,11 +371,15 @@ export default function TaskDetailPage() {
                     rel="noreferrer"
                     className="block rounded-xl bg-surface-muted px-3 py-2 text-sm"
                   >
-                    <div className="font-medium text-ink">{c.title}</div>
-                    <div className="text-xs text-ink-mute">{c.sha?.slice(0, 8)} · {c.authorName}</div>
+                    <div className="break-words font-medium text-ink">{c.title}</div>
+                    <div className="text-xs text-ink-mute">
+                      {c.sha?.slice(0, 8)} · {c.authorName}
+                    </div>
                   </a>
                 ))}
-                {!task.commits?.length && <div className="text-sm text-ink-faint">هنوز کامیتی متصل نشده</div>}
+                {!task.commits?.length && (
+                  <div className="text-sm text-ink-faint">هنوز کامیتی متصل نشده</div>
+                )}
               </div>
               {commits.length > 0 && (
                 <div className="mt-4">
@@ -364,7 +400,7 @@ export default function TaskDetailPage() {
               )}
             </section>
 
-            <section className="panel p-5">
+            <section className="panel p-4 sm:p-5">
               <h3 className="font-bold text-ink">مرج‌ریکوئست‌ها</h3>
               <div className="mt-3 space-y-2">
                 {task.mergeRequests?.map((m: any) => (
@@ -375,8 +411,12 @@ export default function TaskDetailPage() {
                     rel="noreferrer"
                     className="block rounded-xl bg-surface-muted px-3 py-2 text-sm"
                   >
-                    <div className="font-medium text-ink">!{m.mrIid} {m.title}</div>
-                    <div className="text-xs text-ink-mute">{m.state} · {m.sourceBranch} → {m.targetBranch}</div>
+                    <div className="break-words font-medium text-ink">
+                      !{m.mrIid} {m.title}
+                    </div>
+                    <div className="text-xs text-ink-mute">
+                      {m.state} · {m.sourceBranch} → {m.targetBranch}
+                    </div>
                   </a>
                 ))}
                 {!task.mergeRequests?.length && (
@@ -401,74 +441,74 @@ export default function TaskDetailPage() {
                 </div>
               )}
             </section>
-
-            {isAdmin && (
-              <section className="panel p-5 lg:col-span-2">
-                <h3 className="font-bold text-ink">وابستگی‌ها</h3>
-                <div className="mt-3 space-y-2">
-                  {deps.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between rounded-xl bg-surface-muted px-3 py-2 text-sm">
-                      <span>
-                        #{d.fromTaskId} {d.type} #{d.toTaskId}
-                        {' — '}
-                        {d.fromTask?.title} → {d.toTask?.title}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn-danger py-1 text-xs"
-                        onClick={async () => {
-                          await api(`/tasks/dependencies/${d.id}`, { method: 'DELETE' });
-                          await load();
-                        }}
-                      >
-                        حذف
-                      </button>
-                    </div>
-                  ))}
-                  {!deps.length && <div className="text-sm text-ink-faint">وابستگی تعریف نشده</div>}
-                </div>
-                <form
-                  className="mt-3 flex flex-wrap gap-2"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    await api('/tasks/dependencies', {
-                      method: 'POST',
-                      body: {
-                        fromTaskId: Number(id),
-                        toTaskId: Number(depTo),
-                        type: 'BLOCKS',
-                      } as any,
-                    });
-                    setDepTo('');
-                    await load();
-                  }}
-                >
-                  <input
-                    className="input w-40"
-                    placeholder="شناسه وظیفه مسدودشونده"
-                    value={depTo}
-                    onChange={(e) => setDepTo(e.target.value)}
-                    required
-                  />
-                  <button className="btn-ghost" type="submit">
-                    این وظیفه مسدود می‌کند
-                  </button>
-                </form>
-              </section>
-            )}
           </>
         )}
 
-        <section className="panel p-5 lg:col-span-2">
+        <section className="panel p-4 sm:p-5 lg:col-span-2">
           <h3 className="font-bold text-ink">زمان‌های ثبت‌شده</h3>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
+
+          {/* Mobile cards */}
+          <div className="mt-3 space-y-3 md:hidden">
+            {task.efforts?.map((e: any) => (
+              <div key={e.id} className="rounded-xl border border-line bg-surface-muted px-3 py-3 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 font-medium text-ink">{e.user?.fullName}</div>
+                  <div className="shrink-0 text-ink-mute">{effortStatusLabel[e.status]}</div>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink-mute">
+                  <span>
+                    منبع:{' '}
+                    {e.source === 'MERGE_REQUEST'
+                      ? 'MR'
+                      : e.source === 'COMMIT'
+                        ? 'کامیت'
+                        : 'دستی'}
+                  </span>
+                  <span>ساعت: {e.hours}</span>
+                  {isAdmin && <span>پیشنهاد: {e.suggestedHours ?? '—'}</span>}
+                  <span>تأیید: {e.approvedHours ?? '—'}</span>
+                </div>
+                <div className="mt-2 break-words text-xs text-ink-soft">
+                  {e.mergeRequest ? (
+                    <a
+                      href={e.mergeRequest.webUrl || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand hover:underline"
+                    >
+                      !{e.mergeRequest.mrIid} {e.mergeRequest.title}
+                    </a>
+                  ) : e.commit ? (
+                    <a
+                      href={e.commit.webUrl || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand hover:underline"
+                    >
+                      {e.commit.sha?.slice(0, 8)} {e.commit.title}
+                    </a>
+                  ) : (
+                    e.description || '—'
+                  )}
+                </div>
+              </div>
+            ))}
+            {!task.efforts?.length && (
+              <div className="text-sm text-ink-faint">زمانی ثبت نشده</div>
+            )}
+          </div>
+
+          {/* Desktop table */}
+          <div className="mt-3 hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-line text-ink-mute">
                   <th className="px-2 py-2 text-right font-medium">کاربر</th>
                   <th className="px-2 py-2 text-right font-medium">منبع</th>
                   <th className="px-2 py-2 text-right font-medium">ساعت</th>
-                  {isAdmin && <th className="px-2 py-2 text-right font-medium">پیشنهاد ادمین</th>}
+                  {isAdmin && (
+                    <th className="px-2 py-2 text-right font-medium">پیشنهاد ادمین</th>
+                  )}
                   <th className="px-2 py-2 text-right font-medium">تأییدشده</th>
                   <th className="px-2 py-2 text-right font-medium">وضعیت</th>
                   <th className="px-2 py-2 text-right font-medium">توضیح / MR</th>
@@ -490,7 +530,9 @@ export default function TaskDetailPage() {
                       <td className="px-2 py-2">
                         {e.suggestedHours ?? '—'}
                         {e.adviceMeta?.linesChanged != null && (
-                          <div className="text-xs text-ink-mute">{e.adviceMeta.linesChanged} خط</div>
+                          <div className="text-xs text-ink-mute">
+                            {e.adviceMeta.linesChanged} خط
+                          </div>
                         )}
                       </td>
                     )}
@@ -526,7 +568,7 @@ export default function TaskDetailPage() {
           </div>
         </section>
 
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <CommentBox taskId={Number(id)} comments={task.comments || []} onAdded={load} />
         </div>
       </div>

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { formatDate } from '../lib/labels';
 
 const STEP_COLORS = ['#64748b', '#0f6e56', '#1d4ed8', '#c2410c', '#7e22ce', '#0e7490', '#b91c1c'];
 
@@ -84,7 +85,7 @@ export default function ProjectDetailPage() {
             </div>
             {project.lastGitlabSyncAt && (
               <div className="mt-1 text-xs text-ink-mute">
-                آخرین همگام‌سازی گیت‌لب: {new Date(project.lastGitlabSyncAt).toLocaleString('fa-IR')}
+                آخرین همگام‌سازی گیت‌لب: {formatDate(project.lastGitlabSyncAt)}
               </div>
             )}
           </div>

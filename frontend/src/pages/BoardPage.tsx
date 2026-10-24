@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import CompleteSoftwareTaskModal from '../components/CompleteSoftwareTaskModal';
+import JalaliDatePicker from '../components/JalaliDatePicker';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { taskStatusColor, taskStatusLabel, taskStatuses } from '../lib/labels';
+import { formatDateOnly, taskStatusColor, taskStatusLabel, taskStatuses } from '../lib/labels';
 
 type Task = {
   id: number;
@@ -264,13 +265,21 @@ export default function BoardPage() {
         return;
       }
 
+      if (!form.assigneeIds.length) {
+        setError('حداقل یک مسئول برای وظیفه انتخاب کنید');
+        return;
+      }
+
       const fd = new FormData();
       fd.append('title', form.title);
       fd.append('description', form.description);
       fd.append('priority', form.priority);
       fd.append('status', 'TODO');
       fd.append('projectId', projectId);
-      if (form.dueDate) fd.append('dueDate', new Date(form.dueDate).toISOString());
+      if (form.dueDate) {
+        // Noon Tehran so the calendar day stays stable across UTC storage
+        fd.append('dueDate', new Date(`${form.dueDate}T12:00:00+03:30`).toISOString());
+      }
       fd.append('assigneeIds', JSON.stringify(form.assigneeIds));
       if (files) Array.from(files).forEach((f) => fd.append('files', f));
 
@@ -413,12 +422,10 @@ export default function BoardPage() {
               </select>
             </div>
             <div>
-              <label className="label">مهلت</label>
-              <input
-                className="input"
-                type="date"
+              <label className="label">مهلت (شمسی)</label>
+              <JalaliDatePicker
                 value={form.dueDate}
-                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                onChange={(dueDate) => setForm({ ...form, dueDate })}
               />
             </div>
             <div className="md:col-span-2">
@@ -654,7 +661,10 @@ function TaskCard({
         <span className={`board-prio ${prio.className}`}>{prio.label}</span>
       </div>
 
-      <div className="board-card-meta">{task.project?.name || 'بدون پروژه'}</div>
+      <div className="board-card-meta">
+        {task.project?.name || 'بدون پروژه'}
+        {task.dueDate ? ` · مهلت ${formatDateOnly(task.dueDate)}` : ''}
+      </div>
 
       <div className="board-card-foot">
         <div className="board-avatars">
@@ -668,6 +678,14 @@ function TaskCard({
           )}
           {!task.assignees.length && <span className="text-[11px] text-ink-faint">بدون مسئول</span>}
         </div>
+        <Link
+          to={`/tasks/${task.id}`}
+          className="board-detail-btn"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          جزئیات
+        </Link>
       </div>
 
       {mode === 'status' ? (
