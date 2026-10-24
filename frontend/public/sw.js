@@ -1,5 +1,5 @@
 /* global self, caches, clients, fetch */
-const CACHE = 'pmo-shell-v1';
+const CACHE = 'pmo-shell-v2';
 const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/pwa-192.png', '/pwa-512.png'];
 
 self.addEventListener('install', (event) => {

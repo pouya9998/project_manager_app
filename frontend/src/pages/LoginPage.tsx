@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import BrandLogo from '../components/BrandLogo';
+import PwaInstallButton from '../components/PwaInstallButton';
 import { useAuth } from '../lib/auth';
 import { useSettings } from '../lib/settings';
 
@@ -95,6 +96,10 @@ export default function LoginPage() {
               {busy ? 'در حال ورود...' : 'ورود'}
             </button>
           </form>
+
+          <div className="mt-5">
+            <PwaInstallButton variant="banner" />
+          </div>
         </div>
       </section>
     </div>

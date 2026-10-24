@@ -5,6 +5,7 @@ import { useSettings } from '../lib/settings';
 import { api, uploadsUrl } from '../lib/api';
 import { enablePushNotifications } from '../lib/push';
 import BrandLogo from './BrandLogo';
+import PwaInstallButton from './PwaInstallButton';
 
 const links = [
   { to: '/', label: 'داشبورد', end: true },
@@ -150,6 +151,9 @@ function SideNav({
       </nav>
 
       <div className="mt-4 border-t border-line pt-4">
+        <div className="mb-2 px-1">
+          <PwaInstallButton variant="button" />
+        </div>
         <NavLink
           to="/profile"
           onClick={() => onNavigate?.()}
@@ -307,6 +311,7 @@ export default function Layout() {
             </div>
           </div>
           <div className="relative flex items-center gap-1">
+            <PwaInstallButton variant="icon" />
             <button
               type="button"
               className="relative grid h-10 w-10 place-items-center rounded-xl border border-line bg-surface-muted text-ink"

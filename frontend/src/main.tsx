@@ -4,7 +4,10 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './lib/auth';
 import { SettingsProvider } from './lib/settings';
+import { initPwaInstallCapture } from './lib/pwa-install';
 import './index.css';
+
+initPwaInstallCapture();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
