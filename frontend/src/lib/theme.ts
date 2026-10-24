@@ -46,6 +46,23 @@ export function applyBrandTheme(color?: string | null) {
   root.style.setProperty('--brand-soft', soft);
   root.style.setProperty('--brand-mist', mist);
   root.style.setProperty('--brand-rgb', Object.values(hexToRgb(primary)).join(' '));
+
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) themeMeta.setAttribute('content', primary);
+}
+
+/** Apply custom favicon from settings, or fall back to default /favicon.svg */
+export function applyFavicon(faviconUrl?: string | null) {
+  const href = faviconUrl || '/favicon.svg';
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.type = href.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
+  // bust cache when admin replaces favicon
+  link.href = faviconUrl ? `${href}${href.includes('?') ? '&' : '?'}v=${Date.now()}` : href;
 }
 
 export const COLOR_PRESETS = [

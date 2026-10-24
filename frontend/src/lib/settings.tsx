@@ -1,12 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api } from './api';
-import { applyBrandTheme } from './theme';
+import { api, uploadsUrl } from './api';
+import { applyBrandTheme, applyFavicon } from './theme';
 
 export type AppSettings = {
   id: number;
   appName: string;
   tagline?: string | null;
   logoFile?: string | null;
+  faviconFile?: string | null;
   primaryColor?: string | null;
 };
 
@@ -22,10 +23,17 @@ const defaults: AppSettings = {
   appName: 'سامانه مدیریت پروژه',
   tagline: 'مدیریت وظایف، گیت‌لب و جلسات',
   logoFile: null,
+  faviconFile: null,
   primaryColor: '#0f6e56',
 };
 
 const Ctx = createContext<SettingsCtx | null>(null);
+
+function applySettingsSideEffects(s: AppSettings) {
+  applyBrandTheme(s.primaryColor);
+  applyFavicon(s.faviconFile ? uploadsUrl(`branding/${s.faviconFile}`) : null);
+  if (s.appName) document.title = s.appName;
+}
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettingsState] = useState<AppSettings>(defaults);
@@ -33,8 +41,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const setSettings = useCallback((s: AppSettings) => {
     setSettingsState(s);
-    applyBrandTheme(s.primaryColor);
-    if (s.appName) document.title = s.appName;
+    applySettingsSideEffects(s);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -43,6 +50,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSettings(data);
     } catch {
       applyBrandTheme(defaults.primaryColor);
+      applyFavicon(null);
       document.title = defaults.appName;
     } finally {
       setLoading(false);

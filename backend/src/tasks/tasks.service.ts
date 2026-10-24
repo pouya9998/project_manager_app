@@ -4,13 +4,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AppNotificationType, Role, TaskStatus } from '@prisma/client';
+import {
+  AppNotificationType,
+  EngineeringEventSource,
+  EngineeringEventType,
+  ProjectType,
+  Role,
+  TaskStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { GitlabService } from '../gitlab/gitlab.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { LinkCommitDto } from './dto/link-commit.dto';
 import { LinkMrDto } from './dto/link-mr.dto';
+
+const SOFTWARE_DONE_HINT =
+  'برای اتمام وظیفه نرم‌افزاری، MR را انتخاب و زمان را ثبت کنید (مسیر تکمیل با مرج‌ریکوئست)';
 
 const taskInclude = {
   project: {
@@ -30,10 +41,30 @@ const taskInclude = {
   attachments: true,
   commits: { orderBy: { createdAt: 'desc' as const } },
   mergeRequests: { orderBy: { createdAt: 'desc' as const } },
+  branches: { orderBy: { updatedAt: 'desc' as const } },
   efforts: {
     include: {
       user: { select: { id: true, fullName: true } },
       reviewer: { select: { id: true, fullName: true } },
+      commit: {
+        select: {
+          id: true,
+          sha: true,
+          title: true,
+          webUrl: true,
+          additions: true,
+          deletions: true,
+        },
+      },
+      mergeRequest: {
+        select: {
+          id: true,
+          mrIid: true,
+          title: true,
+          webUrl: true,
+          state: true,
+        },
+      },
     },
     orderBy: { createdAt: 'desc' as const },
   },
@@ -54,6 +85,7 @@ export class TasksService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private gitlab: GitlabService,
   ) {}
 
   async findAll(
@@ -81,6 +113,20 @@ export class TasksService {
     });
     if (!task) throw new NotFoundException('وظیفه یافت نشد');
     this.assertAccess(task, user);
+    // Hide LOC/salary advice from non-admins on nested efforts
+    if (user.role !== Role.ADMIN && task.efforts?.length) {
+      return {
+        ...task,
+        efforts: task.efforts.map((e: any) => {
+          const { suggestedHours, adviceMeta, judgeSource, ...rest } = e;
+          if (rest.commit) {
+            const { additions, deletions, ...c } = rest.commit;
+            rest.commit = c;
+          }
+          return rest;
+        }),
+      };
+    }
     return task;
   }
 
@@ -138,6 +184,15 @@ export class TasksService {
       },
     );
 
+    await this.gitlab.recordEvent({
+      taskId: task.id,
+      projectId: task.projectId,
+      type: EngineeringEventType.TASK_CREATED,
+      source: EngineeringEventSource.INTERNAL,
+      externalId: `task:created:${task.id}`,
+      title: 'ایجاد وظیفه',
+    });
+
     return task;
   }
 
@@ -158,6 +213,14 @@ export class TasksService {
       }
     }
 
+    const prevStatus = task.status;
+    if (
+      dto.status === TaskStatus.DONE &&
+      prevStatus !== TaskStatus.DONE &&
+      task.project?.type === ProjectType.SOFTWARE
+    ) {
+      throw new BadRequestException(SOFTWARE_DONE_HINT);
+    }
     const updated = await this.prisma.task.update({
       where: { id: task.id },
       data: {
@@ -172,6 +235,17 @@ export class TasksService {
       include: taskInclude,
     });
 
+    if (dto.status && dto.status !== prevStatus) {
+      await this.gitlab.recordEvent({
+        taskId: updated.id,
+        projectId: updated.projectId,
+        type: EngineeringEventType.STATUS_CHANGED,
+        source: EngineeringEventSource.INTERNAL,
+        externalId: `status:${updated.id}:${prevStatus}:${dto.status}:${Date.now()}`,
+        title: `وضعیت: ${prevStatus} → ${dto.status}`,
+      });
+    }
+
     if (dto.assigneeIds) {
       const newlyAssigned = dto.assigneeIds.filter(
         (uid) => !previousAssignees.has(uid) && uid !== user.id,
@@ -183,18 +257,44 @@ export class TasksService {
         link: `/tasks/${updated.id}`,
         meta: { taskId: updated.id },
       });
+      await this.gitlab.recordEvent({
+        taskId: updated.id,
+        projectId: updated.projectId,
+        type: EngineeringEventType.ASSIGNEE_CHANGED,
+        source: EngineeringEventSource.INTERNAL,
+        externalId: `assignees:${updated.id}:${Date.now()}`,
+        title: 'تغییر مسئولان',
+      });
     }
 
     return updated;
   }
 
   async updateStatus(id: number, status: TaskStatus, user: { id: number; role: Role }) {
-    await this.findOne(id, user);
-    return this.prisma.task.update({
+    const task = await this.findOne(id, user);
+    if (
+      status === TaskStatus.DONE &&
+      task.status !== TaskStatus.DONE &&
+      task.project?.type === ProjectType.SOFTWARE
+    ) {
+      throw new BadRequestException(SOFTWARE_DONE_HINT);
+    }
+    const updated = await this.prisma.task.update({
       where: { id },
       data: { status },
       include: taskInclude,
     });
+    if (status !== task.status) {
+      await this.gitlab.recordEvent({
+        taskId: id,
+        projectId: task.projectId,
+        type: EngineeringEventType.STATUS_CHANGED,
+        source: EngineeringEventSource.INTERNAL,
+        externalId: `status:${id}:${task.status}:${status}:${Date.now()}`,
+        title: `وضعیت: ${task.status} → ${status}`,
+      });
+    }
+    return updated;
   }
 
   async updateStep(id: number, stepId: number | null, user: { id: number; role: Role }) {
@@ -228,9 +328,14 @@ export class TasksService {
   }
 
   async linkCommit(id: number, dto: LinkCommitDto, user: { id: number; role: Role }) {
-    await this.findOne(id, user);
-    return this.prisma.taskCommit.create({
-      data: {
+    const task = await this.findOne(id, user);
+    if (!task.projectId || task.project?.type !== ProjectType.SOFTWARE) {
+      throw new ForbiddenException('لینک گیت‌لب فقط برای پروژه‌های نرم‌افزاری است');
+    }
+    await this.gitlab.ensureSoftwareGitlabProject(task.projectId);
+    const row = await this.prisma.taskCommit.upsert({
+      where: { taskId_sha: { taskId: id, sha: dto.sha } },
+      create: {
         taskId: id,
         sha: dto.sha,
         title: dto.title,
@@ -238,13 +343,35 @@ export class TasksService {
         authorName: dto.authorName,
         committedAt: dto.committedAt ? new Date(dto.committedAt) : undefined,
       },
+      update: {
+        title: dto.title,
+        webUrl: dto.webUrl,
+        authorName: dto.authorName,
+        committedAt: dto.committedAt ? new Date(dto.committedAt) : undefined,
+      },
     });
+    await this.gitlab.recordEvent({
+      taskId: id,
+      projectId: task.projectId,
+      type: EngineeringEventType.COMMIT_LINKED,
+      source: EngineeringEventSource.MANUAL,
+      externalId: `manual-commit:${dto.sha}`,
+      title: `کامیت دستی: ${dto.title}`,
+      actorName: dto.authorName,
+      webUrl: dto.webUrl,
+    });
+    return row;
   }
 
   async linkMr(id: number, dto: LinkMrDto, user: { id: number; role: Role }) {
-    await this.findOne(id, user);
-    return this.prisma.taskMergeRequest.create({
-      data: {
+    const task = await this.findOne(id, user);
+    if (!task.projectId || task.project?.type !== ProjectType.SOFTWARE) {
+      throw new ForbiddenException('لینک گیت‌لب فقط برای پروژه‌های نرم‌افزاری است');
+    }
+    await this.gitlab.ensureSoftwareGitlabProject(task.projectId);
+    const row = await this.prisma.taskMergeRequest.upsert({
+      where: { taskId_mrIid: { taskId: id, mrIid: dto.mrIid } },
+      create: {
         taskId: id,
         mrIid: dto.mrIid,
         title: dto.title,
@@ -253,7 +380,24 @@ export class TasksService {
         sourceBranch: dto.sourceBranch,
         targetBranch: dto.targetBranch,
       },
+      update: {
+        title: dto.title,
+        state: dto.state,
+        webUrl: dto.webUrl,
+        sourceBranch: dto.sourceBranch,
+        targetBranch: dto.targetBranch,
+      },
     });
+    await this.gitlab.recordEvent({
+      taskId: id,
+      projectId: task.projectId,
+      type: EngineeringEventType.MANUAL_LINK,
+      source: EngineeringEventSource.MANUAL,
+      externalId: `manual-mr:${dto.mrIid}`,
+      title: `MR دستی !${dto.mrIid}: ${dto.title}`,
+      webUrl: dto.webUrl,
+    });
+    return row;
   }
 
   async addComment(

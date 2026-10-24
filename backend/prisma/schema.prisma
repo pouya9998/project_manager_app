@@ -12,6 +12,11 @@ enum Role {
   USER
 }
 
+enum ProjectType {
+  SOFTWARE
+  NON_SOFTWARE
+}
+
 enum TaskStatus {
   BACKLOG
   TODO
@@ -21,11 +26,34 @@ enum TaskStatus {
   CANCELLED
 }
 
+enum TaskKind {
+  EPIC
+  FEATURE
+  STORY
+  TASK
+  BUG
+  IMPROVEMENT
+  TECH_DEBT
+}
+
 enum EffortStatus {
   PENDING
   APPROVED
   ADJUSTED
   REJECTED
+}
+
+enum EffortSource {
+  MANUAL
+  COMMIT
+  MERGE_REQUEST
+}
+
+/// Who/what produced suggestedHours — HEURISTIC today; AI later
+enum EffortJudgeSource {
+  NONE
+  HEURISTIC
+  AI
 }
 
 enum ChatRoomType {
@@ -60,6 +88,61 @@ enum AppNotificationType {
   TASK_MENTION
   SYSTEM
   POLL
+  PIPELINE_FAILED
+  MR_STALE
+  DEPLOYMENT_FAILED
+  TASK_BLOCKED
+  GITLAB_SYNC
+}
+
+enum EngineeringEventSource {
+  INTERNAL
+  GITLAB_SYNC
+  GITLAB_WEBHOOK
+  MANUAL
+}
+
+enum EngineeringEventType {
+  TASK_CREATED
+  TASK_UPDATED
+  STATUS_CHANGED
+  ASSIGNEE_CHANGED
+  BRANCH_OBSERVED
+  COMMIT_LINKED
+  MR_OPENED
+  MR_UPDATED
+  MR_MERGED
+  MR_CLOSED
+  PIPELINE_STARTED
+  PIPELINE_PASSED
+  PIPELINE_FAILED
+  REVIEW_APPROVED
+  RELEASE_CREATED
+  DEPLOYMENT_STARTED
+  DEPLOYMENT_SUCCEEDED
+  DEPLOYMENT_FAILED
+  COMMENT_ADDED
+  MANUAL_LINK
+}
+
+enum DeployEnvironment {
+  DEVELOPMENT
+  STAGING
+  PRODUCTION
+  OTHER
+}
+
+enum DeploymentStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELED
+}
+
+enum TaskDependencyType {
+  BLOCKS
+  BLOCKED_BY
 }
 
 model AppSettings {
@@ -67,6 +150,7 @@ model AppSettings {
   appName      String   @default("سامانه مدیریت پروژه")
   tagline      String?  @default("مدیریت وظایف، گفتگو و گیت‌لب")
   logoFile     String?
+  faviconFile  String?
   primaryColor String   @default("#0f6e56")
   updatedAt    DateTime @updatedAt
   createdAt    DateTime @default(now())
@@ -81,21 +165,23 @@ model JobPosition {
 }
 
 model User {
-  id           Int          @id @default(autoincrement())
-  email        String       @unique
-  password     String
-  fullName     String
-  role         Role         @default(USER)
-  jobPosition  JobPosition? @relation(fields: [jobPositionId], references: [id])
+  id            Int          @id @default(autoincrement())
+  email         String       @unique
+  password      String
+  fullName      String
+  role          Role         @default(USER)
+  jobPosition   JobPosition? @relation(fields: [jobPositionId], references: [id])
   jobPositionId Int?
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  avatarFile    String?
+  statusMessage String?
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  createdTasks    Task[]           @relation("TaskCreator")
-  assignedTasks   TaskAssignee[]
-  effortLogs      EffortLog[]
-  reviewedEfforts EffortLog[]      @relation("EffortReviewer")
+  createdTasks      Task[]               @relation("TaskCreator")
+  assignedTasks     TaskAssignee[]
+  effortLogs        EffortLog[]
+  reviewedEfforts   EffortLog[]          @relation("EffortReviewer")
   comments          TaskComment[]
   mentions          CommentMention[]
   chatMessages      ChatMessage[]
@@ -108,27 +194,60 @@ model User {
 }
 
 model GitLabConfig {
-  id           Int      @id @default(autoincrement())
-  name         String   @default("پیش‌فرض")
-  baseUrl      String
-  accessToken  String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              Int       @id @default(autoincrement())
+  name            String    @default("پیش‌فرض")
+  baseUrl         String
+  accessToken     String    @default("")
+  tokenCiphertext String?
+  tokenLast4      String?
+  webhookSecret   String?
+  isActive        Boolean   @default(true)
+  lastHealthAt    DateTime?
+  lastHealthOk    Boolean?
+  lastHealthError String?
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model Project {
-  id              Int      @id @default(autoincrement())
-  name            String
-  description     String?
+  id                  Int       @id @default(autoincrement())
+  name                String
+  description         String?
+  type                ProjectType @default(NON_SOFTWARE)
+  gitlabProjectId     Int?
+  gitlabPath          String?
+  gitlabWebUrl        String?
+  gitlabWebhookSecret String?
+  lastGitlabSyncAt    DateTime?
+  lastGitlabSyncError String?
+  workflowRules       Json?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  tasks               Task[]
+  steps               ProjectStep[]
+  webhookEvents       GitLabWebhookEvent[]
+  engineeringEvents   TaskEngineeringEvent[]
+  pipelines           GitlabPipeline[]
+  releases            ProjectRelease[]
+  deployments         ProjectDeployment[]
+}
+
+model GitLabWebhookEvent {
+  id              Int       @id @default(autoincrement())
+  deliveryId      String    @unique
+  eventType       String
   gitlabProjectId Int?
-  gitlabPath      String?
-  gitlabWebUrl    String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  tasks           Task[]
-  steps           ProjectStep[]
+  project         Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId       Int?
+  payloadHash     String
+  payload         Json
+  processedAt     DateTime?
+  error           String?
+  createdAt       DateTime  @default(now())
+
+  @@index([projectId, createdAt])
 }
 
 model ChatRoom {
@@ -198,12 +317,12 @@ model ChatMessageReceipt {
 }
 
 model ChatMessageMention {
-  id         Int             @id @default(autoincrement())
-  message    ChatMessage     @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  messageId  Int
-  type       ChatMentionType
-  refId      Int
-  label      String
+  id        Int             @id @default(autoincrement())
+  message   ChatMessage     @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId Int
+  type      ChatMentionType
+  refId     Int
+  label     String
 }
 
 model ChatPoll {
@@ -217,28 +336,28 @@ model ChatPoll {
 }
 
 model ChatPollOption {
-  id     Int           @id @default(autoincrement())
-  poll   ChatPoll      @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  id     Int            @id @default(autoincrement())
+  poll   ChatPoll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
   pollId Int
   text   String
-  order  Int           @default(0)
+  order  Int            @default(0)
   votes  ChatPollVote[]
 }
 
 model ChatPollVote {
-  id       Int            @id @default(autoincrement())
-  option   ChatPollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
-  optionId Int
-  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId   Int
-  createdAt DateTime      @default(now())
+  id        Int            @id @default(autoincrement())
+  option    ChatPollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  optionId  Int
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  createdAt DateTime       @default(now())
 
   @@unique([optionId, userId])
 }
 
 model AppNotification {
-  id        Int                  @id @default(autoincrement())
-  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        Int                 @id @default(autoincrement())
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    Int
   type      AppNotificationType
   title     String
@@ -246,7 +365,7 @@ model AppNotification {
   link      String?
   meta      Json?
   readAt    DateTime?
-  createdAt DateTime             @default(now())
+  createdAt DateTime            @default(now())
 
   @@index([userId, createdAt])
 }
@@ -262,21 +381,23 @@ model PushSubscription {
 }
 
 model ProjectStep {
-  id          Int      @id @default(autoincrement())
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  projectId   Int
-  title       String
-  color       String   @default("#64748b")
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  tasks       Task[]
+  id        Int      @id @default(autoincrement())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId Int
+  title     String
+  color     String   @default("#64748b")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
 }
 
 model Task {
   id          Int        @id @default(autoincrement())
   title       String
   description String?
+  kind        TaskKind   @default(TASK)
+  externalKey String?
   status      TaskStatus @default(BACKLOG)
   priority    Int        @default(2)
   project     Project?   @relation(fields: [projectId], references: [id])
@@ -289,12 +410,19 @@ model Task {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  assignees    TaskAssignee[]
-  attachments  TaskAttachment[]
-  commits      TaskCommit[]
-  mergeRequests TaskMergeRequest[]
-  efforts      EffortLog[]
-  comments     TaskComment[]
+  assignees         TaskAssignee[]
+  attachments       TaskAttachment[]
+  commits           TaskCommit[]
+  mergeRequests     TaskMergeRequest[]
+  branches          TaskBranch[]
+  efforts           EffortLog[]
+  comments          TaskComment[]
+  engineeringEvents TaskEngineeringEvent[]
+  pipelines         GitlabPipeline[]
+  depsFrom          TaskDependency[] @relation("DepFrom")
+  depsTo            TaskDependency[] @relation("DepTo")
+
+  @@index([externalKey])
 }
 
 model TaskAssignee {
@@ -319,56 +447,185 @@ model TaskAttachment {
 }
 
 model TaskCommit {
-  id          Int      @id @default(autoincrement())
-  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  taskId      Int
-  sha         String
-  title       String
-  webUrl      String?
-  authorName  String?
-  committedAt DateTime?
-  createdAt   DateTime @default(now())
+  id             Int       @id @default(autoincrement())
+  task           Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId         Int
+  sha            String
+  title          String
+  webUrl         String?
+  authorName     String?
+  committedAt    DateTime?
+  branch         String?
+  additions      Int?
+  deletions      Int?
+  pipelineStatus String?
+  createdAt      DateTime  @default(now())
+  effortClaims   EffortLog[]
+
+  @@unique([taskId, sha])
 }
 
 model TaskMergeRequest {
-  id           Int      @id @default(autoincrement())
-  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  taskId       Int
-  mrIid        Int
-  title        String
-  state        String?
-  webUrl       String?
-  sourceBranch String?
-  targetBranch String?
-  createdAt    DateTime @default(now())
+  id                Int       @id @default(autoincrement())
+  task              Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId            Int
+  mrIid             Int
+  title             String
+  state             String?
+  webUrl            String?
+  sourceBranch      String?
+  targetBranch      String?
+  authorName        String?
+  draft             Boolean   @default(false)
+  mergedAt          DateTime?
+  closedAt          DateTime?
+  approvalsRequired Int?
+  approvalsReceived Int?
+  pipelineStatus    String?
+  updatedAtGitlab   DateTime?
+  createdAt         DateTime  @default(now())
+  effortClaims      EffortLog[]
+
+  @@unique([taskId, mrIid])
+}
+
+model TaskBranch {
+  id          Int      @id @default(autoincrement())
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId      Int
+  name        String
+  webUrl      String?
+  isDeleted   Boolean  @default(false)
+  firstSeenAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([taskId, name])
+}
+
+model TaskEngineeringEvent {
+  id         Int                    @id @default(autoincrement())
+  task       Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId     Int
+  project    Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId  Int?
+  type       EngineeringEventType
+  source     EngineeringEventSource
+  externalId String?
+  title      String
+  body       String?
+  actorName  String?
+  webUrl     String?
+  meta       Json?
+  occurredAt DateTime               @default(now())
+  createdAt  DateTime               @default(now())
+
+  @@index([taskId, occurredAt])
+}
+
+model GitlabPipeline {
+  id               Int       @id @default(autoincrement())
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId        Int
+  gitlabPipelineId Int
+  sha              String?
+  ref              String?
+  status           String
+  webUrl           String?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  durationSec      Float?
+  task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId           Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([projectId, gitlabPipelineId])
+}
+
+model ProjectRelease {
+  id          Int                 @id @default(autoincrement())
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   Int
+  name        String
+  tagName     String?
+  description String?
+  webUrl      String?
+  releasedAt  DateTime?
+  createdAt   DateTime            @default(now())
+  deployments ProjectDeployment[]
+
+  @@index([projectId])
+}
+
+model ProjectDeployment {
+  id          Int               @id @default(autoincrement())
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   Int
+  release     ProjectRelease?   @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId   Int?
+  environment DeployEnvironment @default(OTHER)
+  status      DeploymentStatus  @default(PENDING)
+  ref         String?
+  sha         String?
+  webUrl      String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime          @default(now())
+}
+
+model TaskDependency {
+  id         Int                @id @default(autoincrement())
+  fromTask   Task               @relation("DepFrom", fields: [fromTaskId], references: [id], onDelete: Cascade)
+  fromTaskId Int
+  toTask     Task               @relation("DepTo", fields: [toTaskId], references: [id], onDelete: Cascade)
+  toTaskId   Int
+  type       TaskDependencyType @default(BLOCKS)
+  createdAt  DateTime           @default(now())
+
+  @@unique([fromTaskId, toTaskId, type])
 }
 
 model EffortLog {
-  id             Int          @id @default(autoincrement())
-  task           Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id             Int               @id @default(autoincrement())
+  task           Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
   taskId         Int
-  user           User         @relation(fields: [userId], references: [id])
+  user           User              @relation(fields: [userId], references: [id])
   userId         Int
+  /// Claimed hours (user salary claim — never show suggestedHours to the user)
   hours          Float
+  /// Admin-only advice (LOC heuristic now; AI later via judgeSource=AI)
+  suggestedHours Float?
+  judgeSource    EffortJudgeSource @default(NONE)
+  /// { method, linesChanged, formula, model?, raw? } — admin-only; future AI payload
+  adviceMeta     Json?
   approvedHours  Float?
   description    String?
-  status         EffortStatus @default(PENDING)
-  reviewer       User?        @relation("EffortReviewer", fields: [reviewerId], references: [id])
+  source         EffortSource      @default(MANUAL)
+  commit         TaskCommit?       @relation(fields: [commitId], references: [id], onDelete: SetNull)
+  commitId       Int?
+  mergeRequest   TaskMergeRequest? @relation(fields: [mergeRequestId], references: [id], onDelete: SetNull)
+  mergeRequestId Int?
+  status         EffortStatus      @default(PENDING)
+  reviewer       User?             @relation("EffortReviewer", fields: [reviewerId], references: [id])
   reviewerId     Int?
   reviewNote     String?
-  workDate       DateTime     @default(now())
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  workDate       DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([userId, commitId])
+  @@unique([userId, mergeRequestId])
+  @@index([status, createdAt])
 }
 
 model TaskComment {
-  id        Int      @id @default(autoincrement())
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id        Int              @id @default(autoincrement())
+  task      Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
   taskId    Int
-  user      User     @relation(fields: [userId], references: [id])
+  user      User             @relation(fields: [userId], references: [id])
   userId    Int
   content   String
-  createdAt DateTime @default(now())
+  createdAt DateTime         @default(now())
   mentions  CommentMention[]
 }
 

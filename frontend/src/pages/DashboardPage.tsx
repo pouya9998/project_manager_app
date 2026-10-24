@@ -10,6 +10,20 @@ type Stats = {
   byStatus: Record<string, number>;
   pendingEfforts: number;
   approvedHours: number;
+  softwareProjects?: number;
+  engineering?: {
+    periodDays: number;
+    metrics: {
+      wip: number;
+      overdue: number;
+      openMrs: number;
+      staleMrs: number;
+      pipelineSuccessRate: number | null;
+      leadTimeDays: number | null;
+      cycleTimeDays: number | null;
+      doneInPeriod: number;
+    };
+  };
 };
 
 export default function DashboardPage() {
@@ -26,6 +40,8 @@ export default function DashboardPage() {
     { label: 'زمان‌های در انتظار', value: stats?.pendingEfforts ?? '—', tone: 'bg-amber-50 text-amber-800' },
     { label: 'ساعات تأییدشده', value: stats?.approvedHours ?? '—', tone: 'bg-violet-50 text-violet-800' },
   ];
+
+  const eng = stats?.engineering?.metrics;
 
   return (
     <div className="space-y-6">
@@ -57,6 +73,37 @@ export default function DashboardPage() {
           </div>
         ))}
       </section>
+
+      {isAdmin && eng && (
+        <section className="panel p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-bold text-ink">مهندسی نرم‌افزار (۳۰ روز)</h3>
+            <Link to="/gitlab" className="text-sm text-brand hover:underline">
+              تنظیمات گیت‌لب
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: 'WIP', value: eng.wip },
+              { label: 'عقب‌افتاده', value: eng.overdue },
+              { label: 'MR باز', value: eng.openMrs },
+              { label: 'MR کهنه (>۷روز)', value: eng.staleMrs },
+              {
+                label: 'نرخ موفقیت پایپلاین',
+                value: eng.pipelineSuccessRate == null ? '—' : `${eng.pipelineSuccessRate}%`,
+              },
+              { label: 'Lead time (روز)', value: eng.leadTimeDays ?? '—' },
+              { label: 'Cycle time (روز)', value: eng.cycleTimeDays ?? '—' },
+              { label: 'انجام‌شده در دوره', value: eng.doneInPeriod },
+            ].map((m) => (
+              <div key={m.label} className="rounded-xl border border-line bg-surface-muted px-4 py-3">
+                <div className="text-xs text-ink-mute">{m.label}</div>
+                <div className="mt-1 text-xl font-bold text-ink">{m.value}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="panel p-6">
         <h3 className="text-base font-bold text-ink">توزیع وضعیت وظایف</h3>

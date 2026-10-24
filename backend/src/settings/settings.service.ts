@@ -49,4 +49,35 @@ export class SettingsService {
       data: { logoFile: file.filename },
     });
   }
+
+  async setFavicon(file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('فایل فاویکون ارسال نشده است');
+    const current = await this.get();
+    if (current.faviconFile) {
+      try {
+        await unlink(join(process.cwd(), 'uploads', 'branding', current.faviconFile));
+      } catch {
+        /* ignore */
+      }
+    }
+    return this.prisma.appSettings.update({
+      where: { id: current.id },
+      data: { faviconFile: file.filename },
+    });
+  }
+
+  async clearFavicon() {
+    const current = await this.get();
+    if (current.faviconFile) {
+      try {
+        await unlink(join(process.cwd(), 'uploads', 'branding', current.faviconFile));
+      } catch {
+        /* ignore */
+      }
+    }
+    return this.prisma.appSettings.update({
+      where: { id: current.id },
+      data: { faviconFile: null },
+    });
+  }
 }

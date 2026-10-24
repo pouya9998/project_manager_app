@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ProjectType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GitlabService } from '../gitlab/gitlab.service';
+import { GitlabSyncService } from '../gitlab/gitlab-sync.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 
 @Injectable()
@@ -8,6 +10,7 @@ export class ProjectsService {
   constructor(
     private prisma: PrismaService,
     private gitlab: GitlabService,
+    private sync: GitlabSyncService,
   ) {}
 
   findAll() {
@@ -97,33 +100,45 @@ export class ProjectsService {
     return step;
   }
 
-  async create(dto: CreateProjectDto) {
-    let gitlabMeta: Partial<{
-      gitlabProjectId: number;
-      gitlabPath: string;
-      gitlabWebUrl: string;
-      name: string;
-      description: string;
-    }> = {};
+  private async resolveGitlabMeta(dto: CreateProjectDto, type: ProjectType) {
+    if (type !== ProjectType.SOFTWARE) {
+      if (dto.gitlabProjectId) {
+        throw new BadRequestException('اتصال گیت‌لب فقط برای پروژه‌های نرم‌افزاری مجاز است');
+      }
+      return {
+        gitlabProjectId: null as number | null,
+        gitlabPath: null as string | null,
+        gitlabWebUrl: null as string | null,
+      };
+    }
 
     if (dto.gitlabProjectId) {
       const gp = await this.gitlab.getProject(dto.gitlabProjectId);
-      gitlabMeta = {
-        gitlabProjectId: gp.id,
-        gitlabPath: gp.path_with_namespace,
-        gitlabWebUrl: gp.web_url,
+      return {
+        gitlabProjectId: gp.id as number,
+        gitlabPath: gp.path_with_namespace as string,
+        gitlabWebUrl: gp.web_url as string,
         name: dto.name || gp.name,
         description: dto.description ?? gp.description,
       };
     }
 
+    return {};
+  }
+
+  async create(dto: CreateProjectDto) {
+    const type = dto.type || (dto.gitlabProjectId ? ProjectType.SOFTWARE : ProjectType.NON_SOFTWARE);
+    const gitlabMeta = await this.resolveGitlabMeta(dto, type);
+
     return this.prisma.project.create({
       data: {
-        name: dto.name || gitlabMeta.name || 'پروژه بدون نام',
-        description: dto.description ?? gitlabMeta.description,
-        gitlabProjectId: gitlabMeta.gitlabProjectId,
-        gitlabPath: gitlabMeta.gitlabPath,
-        gitlabWebUrl: gitlabMeta.gitlabWebUrl,
+        name: dto.name || (gitlabMeta as any).name || 'پروژه بدون نام',
+        description: dto.description ?? (gitlabMeta as any).description,
+        type,
+        gitlabProjectId: (gitlabMeta as any).gitlabProjectId ?? null,
+        gitlabPath: (gitlabMeta as any).gitlabPath ?? null,
+        gitlabWebUrl: (gitlabMeta as any).gitlabWebUrl ?? null,
+        workflowRules: dto.workflowRules ?? undefined,
       },
       include: {
         steps: true,
@@ -133,16 +148,50 @@ export class ProjectsService {
   }
 
   async update(id: number, dto: CreateProjectDto) {
-    await this.ensure(id);
+    const existing = await this.ensure(id);
+    const type = dto.type ?? existing.type;
+    const gitlabMeta = await this.resolveGitlabMeta(
+      {
+        ...dto,
+        gitlabProjectId:
+          dto.gitlabProjectId === undefined ? existing.gitlabProjectId ?? undefined : dto.gitlabProjectId,
+      },
+      type,
+    );
+
+    const clearGitlab = type === ProjectType.NON_SOFTWARE;
+
     return this.prisma.project.update({
       where: { id },
       data: {
         name: dto.name,
         description: dto.description,
-        gitlabProjectId: dto.gitlabProjectId,
+        type,
         isActive: dto.isActive,
+        workflowRules: dto.workflowRules === undefined ? undefined : dto.workflowRules,
+        gitlabProjectId: clearGitlab
+          ? null
+          : (gitlabMeta as any).gitlabProjectId !== undefined
+            ? (gitlabMeta as any).gitlabProjectId
+            : dto.gitlabProjectId === null
+              ? null
+              : undefined,
+        gitlabPath: clearGitlab
+          ? null
+          : (gitlabMeta as any).gitlabPath !== undefined
+            ? (gitlabMeta as any).gitlabPath
+            : undefined,
+        gitlabWebUrl: clearGitlab
+          ? null
+          : (gitlabMeta as any).gitlabWebUrl !== undefined
+            ? (gitlabMeta as any).gitlabWebUrl
+            : undefined,
       },
     });
+  }
+
+  async syncGitlab(id: number) {
+    return this.sync.syncProject(id);
   }
 
   async remove(id: number) {

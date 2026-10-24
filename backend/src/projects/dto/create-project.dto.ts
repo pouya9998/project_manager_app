@@ -1,4 +1,5 @@
-import { IsBoolean, IsInt, IsOptional, IsString } from 'class-validator';
+import { ProjectType } from '@prisma/client';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class CreateProjectDto {
   @IsOptional()
@@ -10,10 +11,17 @@ export class CreateProjectDto {
   description?: string;
 
   @IsOptional()
+  @IsEnum(ProjectType)
+  type?: ProjectType;
+
+  @IsOptional()
   @IsInt()
-  gitlabProjectId?: number;
+  gitlabProjectId?: number | null;
 
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  workflowRules?: any;
 }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api } from './api';
 
 export type User = {
@@ -7,6 +7,8 @@ export type User = {
   fullName: string;
   role: 'ADMIN' | 'USER';
   jobPosition?: { id: number; title: string } | null;
+  avatarFile?: string | null;
+  statusMessage?: string | null;
 };
 
 type AuthCtx = {
@@ -14,6 +16,8 @@ type AuthCtx = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
+  setUser: (u: User | null) => void;
   isAdmin: boolean;
 };
 
@@ -23,20 +27,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refreshUser = useCallback(async () => {
+    const token = localStorage.getItem('pmo_token');
+    if (!token) {
+      setUser(null);
+      return;
+    }
+    const me = await api<User>('/auth/me');
+    setUser(me);
+    localStorage.setItem('pmo_user', JSON.stringify(me));
+  }, []);
+
   useEffect(() => {
     const token = localStorage.getItem('pmo_token');
     if (!token) {
       setLoading(false);
       return;
     }
-    api<User>('/auth/me')
-      .then(setUser)
+    refreshUser()
       .catch(() => {
         localStorage.removeItem('pmo_token');
         localStorage.removeItem('pmo_user');
+        setUser(null);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshUser]);
 
   async function login(email: string, password: string) {
     const res = await api<{ accessToken: string; user: User }>('/auth/login', {
@@ -61,6 +76,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         login,
         logout,
+        refreshUser,
+        setUser,
         isAdmin: user?.role === 'ADMIN',
       }}
     >

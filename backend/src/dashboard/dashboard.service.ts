@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { EffortStatus, Role, TaskStatus } from '@prisma/client';
+import { EffortStatus, ProjectType, Role, TaskStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EngineeringService } from '../engineering/engineering.service';
 
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private engineering: EngineeringService,
+  ) {}
 
   async stats(user: { id: number; role: Role }) {
     const taskWhere =
@@ -12,7 +16,7 @@ export class DashboardService {
         ? {}
         : { assignees: { some: { userId: user.id } } };
 
-    const [tasks, byStatus, pendingEfforts, totalHours] = await Promise.all([
+    const [tasks, byStatus, pendingEfforts, totalHours, softwareCount] = await Promise.all([
       this.prisma.task.count({ where: taskWhere }),
       this.prisma.task.groupBy({
         by: ['status'],
@@ -35,6 +39,9 @@ export class DashboardService {
               },
         _sum: { approvedHours: true },
       }),
+      this.prisma.project.count({
+        where: { type: ProjectType.SOFTWARE, isActive: true },
+      }),
     ]);
 
     const statusMap = Object.values(TaskStatus).reduce(
@@ -45,11 +52,18 @@ export class DashboardService {
       {} as Record<string, number>,
     );
 
+    let engineering: any = null;
+    if (user.role === Role.ADMIN && softwareCount > 0) {
+      engineering = await this.engineering.softwareDashboard({ days: 30 });
+    }
+
     return {
       tasks,
       byStatus: statusMap,
       pendingEfforts,
       approvedHours: totalHours._sum.approvedHours || 0,
+      softwareProjects: softwareCount,
+      engineering,
     };
   }
 }

@@ -33,10 +33,10 @@ export default function LoginPage() {
     <div className="grid min-h-screen lg:grid-cols-2">
       <section className="relative hidden overflow-hidden bg-ink text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
         <div
-          className="pointer-events-none absolute inset-0 opacity-60"
+          className="pointer-events-none absolute inset-0 opacity-70"
           style={{
             background:
-              'radial-gradient(ellipse at 20% 20%, rgba(15,110,86,0.55), transparent 50%), radial-gradient(ellipse at 90% 80%, rgba(15,110,86,0.25), transparent 45%)',
+              'radial-gradient(ellipse at 20% 20%, rgba(var(--brand-rgb), 0.55), transparent 50%), radial-gradient(ellipse at 90% 80%, rgba(var(--brand-rgb), 0.28), transparent 45%)',
           }}
         />
         <div className="relative flex items-center gap-3">
@@ -49,7 +49,7 @@ export default function LoginPage() {
           </h2>
           <p className="mt-4 text-base leading-7 text-white/70">
             {settings.tagline ||
-              'مدیریت وظایف، زمان‌کاری و جلسات در یک سامانه یکپارچه با گیت‌لب.'}
+              'مدیریت وظایف، زمان‌کاری و گفتگو در یک سامانه یکپارچه با گیت‌لب.'}
           </p>
         </div>
         <div className="relative text-sm text-white/40">ورود امن به حساب کاربری</div>

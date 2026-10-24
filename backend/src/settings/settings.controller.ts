@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Put,
   Post,
@@ -62,5 +63,41 @@ export class SettingsController {
   )
   uploadLogo(@UploadedFile() file: Express.Multer.File) {
     return this.settings.setLogo(file);
+  }
+
+  @Post('favicon')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @UseInterceptors(
+    FileInterceptor('favicon', {
+      storage: diskStorage({
+        destination: uploadDir,
+        filename: (_req, file, cb) => {
+          const unique = `favicon-${Date.now()}${extname(file.originalname).toLowerCase()}`;
+          cb(null, unique);
+        },
+      }),
+      fileFilter: (_req, file, cb) => {
+        const ok =
+          /^image\/(png|jpe?g|webp|svg\+xml|gif|x-icon|vnd\.microsoft\.icon)$/i.test(
+            file.mimetype,
+          ) || /\.(ico|png|svg|webp|jpe?g)$/i.test(file.originalname);
+        if (!ok) {
+          return cb(new Error('فقط تصویر فاویکون مجاز است') as any, false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 1 * 1024 * 1024 },
+    }),
+  )
+  uploadFavicon(@UploadedFile() file: Express.Multer.File) {
+    return this.settings.setFavicon(file);
+  }
+
+  @Delete('favicon')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  clearFavicon() {
+    return this.settings.clearFavicon();
   }
 }

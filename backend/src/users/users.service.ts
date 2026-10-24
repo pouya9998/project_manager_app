@@ -37,7 +37,12 @@ export class UsersService {
   async update(id: number, dto: UpdateUserDto) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('کاربر یافت نشد');
-    const data: any = { ...dto };
+    const data: any = {};
+    if (dto.email !== undefined) data.email = dto.email;
+    if (dto.fullName !== undefined) data.fullName = dto.fullName;
+    if (dto.role !== undefined) data.role = dto.role;
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.jobPositionId !== undefined) data.jobPositionId = dto.jobPositionId;
     if (dto.password) {
       data.password = await bcrypt.hash(dto.password, 10);
     }

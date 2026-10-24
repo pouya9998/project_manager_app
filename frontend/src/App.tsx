@@ -13,6 +13,7 @@ import PositionsPage from './pages/PositionsPage';
 import EffortsPage from './pages/EffortsPage';
 import GitlabSettingsPage from './pages/GitlabSettingsPage';
 import AppSettingsPage from './pages/AppSettingsPage';
+import ProfilePage from './pages/ProfilePage';
 
 function Private({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="chat/:roomId" element={<ChatPage />} />
         <Route path="efforts" element={<EffortsPage />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route
           path="users"
           element={

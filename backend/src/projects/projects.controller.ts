@@ -45,6 +45,12 @@ export class ProjectsController {
     return this.projects.update(id, dto);
   }
 
+  @Post(':id/gitlab/sync')
+  @Roles(Role.ADMIN)
+  syncGitlab(@Param('id', ParseIntPipe) id: number) {
+    return this.projects.syncGitlab(id);
+  }
+
   @Delete(':id')
   @Roles(Role.ADMIN)
   remove(@Param('id', ParseIntPipe) id: number) {

@@ -71,15 +71,46 @@ export default function ProjectDetailPage() {
       <header className="panel p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="page-title">{project.name}</h2>
+            <div className="flex flex-wrap gap-2">
+              <span className="chip bg-surface-soft text-ink-soft">
+                {project.type === 'SOFTWARE' ? 'نرم‌افزاری' : 'غیرنرم‌افزاری'}
+              </span>
+            </div>
+            <h2 className="page-title mt-2">{project.name}</h2>
             <p className="page-sub">{project.description || 'بدون توضیح'}</p>
             <div className="mt-3 text-sm text-ink-mute">
               {project._count?.tasks ?? 0} وظیفه · {project.steps?.length ?? 0} مرحله
+              {project.gitlabPath ? ` · ${project.gitlabPath}` : ''}
             </div>
+            {project.lastGitlabSyncAt && (
+              <div className="mt-1 text-xs text-ink-mute">
+                آخرین همگام‌سازی گیت‌لب: {new Date(project.lastGitlabSyncAt).toLocaleString('fa-IR')}
+              </div>
+            )}
           </div>
-          <Link to="/chat" className="btn-ghost">
-            گفتگوها
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && project.type === 'SOFTWARE' && project.gitlabProjectId && (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  setError('');
+                  try {
+                    await api(`/projects/${id}/gitlab/sync`, { method: 'POST' });
+                    setMsg('همگام‌سازی گیت‌لب انجام شد');
+                    await load();
+                  } catch (err: any) {
+                    setError(err.message);
+                  }
+                }}
+              >
+                همگام‌سازی گیت‌لب
+              </button>
+            )}
+            <Link to="/chat" className="btn-ghost">
+              گفتگوها
+            </Link>
+          </div>
         </div>
       </header>
 

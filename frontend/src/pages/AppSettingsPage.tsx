@@ -13,6 +13,7 @@ export default function AppSettingsPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
+  const [faviconBusy, setFaviconBusy] = useState(false);
 
   useEffect(() => {
     setAppName(settings.appName);
@@ -69,41 +70,111 @@ export default function AppSettingsPage() {
     }
   }
 
+  async function onFaviconChange(file?: File | null) {
+    if (!file) return;
+    setFaviconBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const fd = new FormData();
+      fd.append('favicon', file);
+      const saved = await api('/settings/favicon', { method: 'POST', formData: fd });
+      setSettings(saved);
+      await refresh();
+      setMessage('فاویکون به‌روزرسانی شد');
+    } catch (err: any) {
+      setError(err.message || 'آپلود فاویکون ناموفق بود');
+    } finally {
+      setFaviconBusy(false);
+    }
+  }
+
+  async function clearFavicon() {
+    setFaviconBusy(true);
+    setError('');
+    try {
+      const saved = await api('/settings/favicon', { method: 'DELETE' });
+      setSettings(saved);
+      await refresh();
+      setMessage('فاویکون به پیش‌فرض برگشت');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setFaviconBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="page-title">تنظیمات برنامه</h2>
-        <p className="page-sub">نام، لوگو و رنگ دکمه‌ها را مدیریت کنید.</p>
+        <p className="page-sub">نام، لوگو، فاویکون و رنگ دکمه‌ها را مدیریت کنید.</p>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
-        <section className="panel p-5">
-          <div className="text-sm font-semibold text-ink">لوگوی شرکت</div>
-          <p className="mt-1 text-xs text-ink-mute">PNG، JPG، WEBP یا SVG — حداکثر ۳ مگابایت</p>
-          <div className="mt-5 flex flex-col items-center gap-4 rounded-xl border border-dashed border-line bg-surface-muted p-6">
-            <BrandLogo size="lg" />
-            {settings.logoFile && (
-              <a
-                className="text-xs text-brand hover:underline"
-                href={uploadsUrl(`branding/${settings.logoFile}`)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                مشاهده فایل فعلی
-              </a>
-            )}
-            <label className="btn-primary cursor-pointer">
-              {logoBusy ? 'در حال آپلود...' : 'انتخاب لوگو'}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
-                className="hidden"
-                disabled={logoBusy}
-                onChange={(e) => onLogoChange(e.target.files?.[0])}
+        <div className="space-y-5">
+          <section className="panel p-5">
+            <div className="text-sm font-semibold text-ink">لوگوی شرکت</div>
+            <p className="mt-1 text-xs text-ink-mute">PNG، JPG، WEBP یا SVG — حداکثر ۳ مگابایت</p>
+            <div className="mt-5 flex flex-col items-center gap-4 rounded-xl border border-dashed border-line bg-surface-muted p-6">
+              <BrandLogo size="lg" />
+              {settings.logoFile && (
+                <a
+                  className="text-xs text-brand hover:underline"
+                  href={uploadsUrl(`branding/${settings.logoFile}`)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  مشاهده فایل فعلی
+                </a>
+              )}
+              <label className="btn-primary cursor-pointer">
+                {logoBusy ? 'در حال آپلود...' : 'انتخاب لوگو'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                  className="hidden"
+                  disabled={logoBusy}
+                  onChange={(e) => onLogoChange(e.target.files?.[0])}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="panel p-5">
+            <div className="text-sm font-semibold text-ink">فاویکون (آیکون تب مرورگر)</div>
+            <p className="mt-1 text-xs text-ink-mute">ICO، PNG یا SVG — حداکثر ۱ مگابایت</p>
+            <div className="mt-5 flex flex-col items-center gap-3 rounded-xl border border-dashed border-line bg-surface-muted p-6">
+              <img
+                src={
+                  settings.faviconFile
+                    ? uploadsUrl(`branding/${settings.faviconFile}`)
+                    : '/favicon.svg'
+                }
+                alt="favicon"
+                className="h-12 w-12 rounded-lg border border-line bg-white object-contain p-1"
               />
-            </label>
-          </div>
-        </section>
+              <div className="text-xs text-ink-mute">
+                {settings.faviconFile ? 'سفارشی' : 'پیش‌فرض سیستم'}
+              </div>
+              <label className="btn-primary cursor-pointer">
+                {faviconBusy ? '...' : 'آپلود فاویکون'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,.ico"
+                  className="hidden"
+                  disabled={faviconBusy}
+                  onChange={(e) => onFaviconChange(e.target.files?.[0])}
+                />
+              </label>
+              {settings.faviconFile && (
+                <button type="button" className="btn-ghost text-xs" onClick={clearFavicon}>
+                  بازگشت به پیش‌فرض
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
 
         <form onSubmit={onSubmit} className="panel space-y-5 p-6">
           <div>

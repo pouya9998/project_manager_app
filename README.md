@@ -107,9 +107,16 @@ pmo/
 | `PORT` | API port (default `3001`) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Optional; auto-generated for Web Push if omitted |
 
-## GitLab token
+## GitLab Engineering
 
-Use a token with access to read projects, commits, and merge requests (e.g. `read_api` or `api`).
+- Only **SOFTWARE** projects can link to GitLab; **NON_SOFTWARE** projects are rejected by the API.
+- Tokens are encrypted at rest (AES-256-GCM from `JWT_SECRET`); API responses never return the raw token.
+- Configure webhook: `POST /api/gitlab/webhooks` with `X-Gitlab-Token`.
+- Manual sync: `POST /api/projects/:id/gitlab/sync`.
+- Auto-link commits/MRs that mention `#taskId` or `TASK-123`.
+- Engineering dashboard metrics (admin): WIP, overdue, open/stale MRs, pipeline success rate, lead/cycle time — see `INSTALL.md` and `engineering.service.ts`.
+
+Token scopes: prefer `api` (or `read_api` for read-only). See **INSTALL.md** for webhook setup and acceptance checklist.
 
 ## License
 

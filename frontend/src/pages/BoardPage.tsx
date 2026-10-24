@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import CompleteSoftwareTaskModal from '../components/CompleteSoftwareTaskModal';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { taskStatusColor, taskStatusLabel, taskStatuses } from '../lib/labels';
@@ -11,7 +12,7 @@ type Task = {
   priority: number;
   stepId?: number | null;
   step?: { id: number; title: string; color: string } | null;
-  project?: { id: number; name: string; steps?: Step[] } | null;
+  project?: { id: number; name: string; type?: string; steps?: Step[] } | null;
   assignees: { user: { id: number; fullName: string } }[];
   dueDate?: string | null;
 };
@@ -22,6 +23,7 @@ type Project = {
   id: number;
   name: string;
   isActive: boolean;
+  type?: string;
   gitlabProjectId?: number;
   steps?: Step[];
 };
@@ -87,6 +89,7 @@ export default function BoardPage() {
     dueDate: '',
   });
   const [files, setFiles] = useState<FileList | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<Task | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find((p) => String(p.id) === filterProjectId),
@@ -185,12 +188,28 @@ export default function BoardPage() {
     el?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [activeCol, isTouch, columns.length]);
 
+  function isSoftwareTask(taskId: number) {
+    const t = tasks.find((x) => x.id === taskId);
+    if (t?.project?.type === 'SOFTWARE') return true;
+    const p = projects.find((x) => x.id === t?.project?.id);
+    return p?.type === 'SOFTWARE';
+  }
+
   async function moveStatus(taskId: number, status: string) {
-    const updated = await api<Task>(`/tasks/${taskId}/status`, {
-      method: 'PATCH',
-      body: { status } as any,
-    });
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t)));
+    if (status === 'DONE' && isSoftwareTask(taskId)) {
+      const t = tasks.find((x) => x.id === taskId);
+      if (t) setCompleteTarget(t);
+      return;
+    }
+    try {
+      const updated = await api<Task>(`/tasks/${taskId}/status`, {
+        method: 'PATCH',
+        body: { status } as any,
+      });
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t)));
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   async function moveStep(taskId: number, stepId: number) {
@@ -216,17 +235,32 @@ export default function BoardPage() {
     try {
       let projectId = form.projectId;
 
+      // HTML "required" on the PMO project select used to block submit when only
+      // a GitLab repo was chosen (it clears projectId). Resolve GitLab → PMO project here.
       if (isAdmin && form.gitlabProjectId && !projectId) {
-        const created = await api<Project>('/projects', {
-          method: 'POST',
-          body: { gitlabProjectId: Number(form.gitlabProjectId) } as any,
-        });
-        projectId = String(created.id);
-        setProjects((p) => [created, ...p]);
+        const gitlabId = Number(form.gitlabProjectId);
+        const existing = projects.find((p) => p.gitlabProjectId === gitlabId);
+        if (existing) {
+          projectId = String(existing.id);
+        } else {
+          const created = await api<Project>('/projects', {
+            method: 'POST',
+            body: {
+              type: 'SOFTWARE',
+              gitlabProjectId: gitlabId,
+            } as any,
+          });
+          projectId = String(created.id);
+          setProjects((p) => [created, ...p]);
+        }
       }
 
       if (!projectId) {
-        setError('انتخاب پروژه الزامی است');
+        setError(
+          isAdmin
+            ? 'یک پروژه داخلی یا یک مخزن گیت‌لب را انتخاب کنید'
+            : 'انتخاب پروژه الزامی است',
+        );
         return;
       }
 
@@ -323,24 +357,29 @@ export default function BoardPage() {
               />
             </div>
             <div className={isAdmin ? '' : 'md:col-span-2'}>
-              <label className="label">پروژه *</label>
+              <label className="label">پروژه داخلی *</label>
               <select
                 className="input"
                 value={form.projectId}
                 onChange={(e) => setForm({ ...form, projectId: e.target.value, gitlabProjectId: '' })}
-                required
               >
                 <option value="">انتخاب پروژه</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
+                    {p.gitlabProjectId ? ' · گیت‌لب' : ''}
                   </option>
                 ))}
               </select>
+              {isAdmin && (
+                <p className="mt-1 text-xs text-ink-mute">
+                  اتصال گیت‌لب فقط تنظیمات توکن است؛ وظیفه باید به یک پروژه داخلی وصل شود. اگر هنوز پروژه‌ای نساخته‌اید، از لیست گیت‌لب بسازید.
+                </p>
+              )}
             </div>
             {isAdmin && (
               <div>
-                <label className="label">یا پروژه گیت‌لب</label>
+                <label className="label">یا ساخت/انتخاب از گیت‌لب</label>
                 <select
                   className="input"
                   value={form.gitlabProjectId}
@@ -349,11 +388,15 @@ export default function BoardPage() {
                   }
                 >
                   <option value="">انتخاب از گیت‌لب</option>
-                  {gitlabProjects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.path_with_namespace || p.name}
-                    </option>
-                  ))}
+                  {gitlabProjects.map((p) => {
+                    const linked = projects.some((x) => x.gitlabProjectId === p.id);
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.path_with_namespace || p.name}
+                        {linked ? ' (متصل)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}
@@ -552,6 +595,19 @@ export default function BoardPage() {
             ))}
           </div>
         </>
+      )}
+
+      {completeTarget && (
+        <CompleteSoftwareTaskModal
+          taskId={completeTarget.id}
+          taskTitle={completeTarget.title}
+          open={Boolean(completeTarget)}
+          onClose={() => setCompleteTarget(null)}
+          onCompleted={() => {
+            setCompleteTarget(null);
+            load();
+          }}
+        />
       )}
     </div>
   );
