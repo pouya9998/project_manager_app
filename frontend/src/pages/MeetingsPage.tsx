@@ -12,6 +12,7 @@ type Meeting = {
   title: string;
   description?: string | null;
   meetingUrl?: string | null;
+  jitsiRoom?: string | null;
   type: 'INSTANT' | 'SCHEDULED' | 'RECURRING';
   status: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED';
   recurrence: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
@@ -23,6 +24,9 @@ type Meeting = {
   project?: { id: number; name: string } | null;
   startedAt?: string | null;
   endedAt?: string | null;
+  liveParticipants?: number;
+  online?: { userId: number; user: UserLite; joinedAt: string }[];
+  jitsiEnabled?: boolean;
 };
 
 const statusLabel: Record<string, string> = {
@@ -82,6 +86,8 @@ export default function MeetingsPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [meetingUrl, setMeetingUrl] = useState('');
+  const [useJitsi, setUseJitsi] = useState(true);
+  const [jitsiAvailable, setJitsiAvailable] = useState(false);
   const [startsAt, setStartsAt] = useState(() => toLocalInputValue(new Date().toISOString()));
   const [endsAt, setEndsAt] = useState(() =>
     toLocalInputValue(new Date(Date.now() + 3600000).toISOString()),
@@ -104,6 +110,12 @@ export default function MeetingsPage() {
 
   useEffect(() => {
     loadCalendar().catch((e) => setError(e.message));
+    api<{ jitsiEnabled: boolean }>('/meetings/config')
+      .then((c) => {
+        setJitsiAvailable(!!c.jitsiEnabled);
+        setUseJitsi(!!c.jitsiEnabled);
+      })
+      .catch(() => setJitsiAvailable(false));
     api<UserLite[]>('/users')
       .then((u) => setUsers(u.filter((x) => x.id !== user?.id)))
       .catch(() => {});
@@ -111,6 +123,16 @@ export default function MeetingsPage() {
       .then(setProjects)
       .catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!id) return;
+    const t = window.setInterval(() => {
+      api<Meeting>(`/meetings/${id}`)
+        .then((m) => setDetail(m))
+        .catch(() => {});
+    }, 15000);
+    return () => window.clearInterval(t);
+  }, [id]);
 
   useEffect(() => {
     setStartNow(wantInstant);
@@ -155,7 +177,8 @@ export default function MeetingsPage() {
         body: {
           title,
           description: description || undefined,
-          meetingUrl: meetingUrl.trim() || undefined,
+          meetingUrl: useJitsi ? undefined : meetingUrl.trim() || undefined,
+          useJitsi: useJitsi && jitsiAvailable,
           type: startNow ? 'INSTANT' : recurrence !== 'NONE' ? 'RECURRING' : 'SCHEDULED',
           startsAt: startNow ? new Date().toISOString() : fromLocalInputValue(startsAt),
           endsAt: fromLocalInputValue(endsAt),
@@ -166,8 +189,14 @@ export default function MeetingsPage() {
         } as any,
       });
       await loadCalendar();
-      if (created.meetingUrl) openExternalMeeting(created.meetingUrl);
       navigate(`/meetings/${created.id}`);
+      if (startNow) {
+        const join = await api<{ url: string }>(`/meetings/${created.id}/join`, {
+          method: 'POST',
+          body: {} as any,
+        });
+        openExternalMeeting(join.url);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -180,8 +209,46 @@ export default function MeetingsPage() {
     try {
       const m = await api<Meeting>(`/meetings/${meetingId}/start`, { method: 'POST', body: {} as any });
       setDetail(m);
-      if (m.meetingUrl) openExternalMeeting(m.meetingUrl);
       await loadCalendar();
+      const join = await api<{ url: string }>(`/meetings/${meetingId}/join`, {
+        method: 'POST',
+        body: {} as any,
+      });
+      openExternalMeeting(join.url);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function joinMeeting(meetingId: number) {
+    setBusy(true);
+    setError('');
+    try {
+      const join = await api<{ url: string }>(`/meetings/${meetingId}/join`, {
+        method: 'POST',
+        body: {} as any,
+      });
+      openExternalMeeting(join.url);
+      const m = await api<Meeting>(`/meetings/${meetingId}`);
+      setDetail(m);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function attachJitsi(meetingId: number) {
+    setBusy(true);
+    try {
+      const m = await api<Meeting>(`/meetings/${meetingId}/ensure-jitsi`, {
+        method: 'POST',
+        body: {} as any,
+      });
+      setDetail(m);
+      setEditUrl(m.meetingUrl || '');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -251,7 +318,7 @@ export default function MeetingsPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="page-title">جلسه جدید</h1>
-            <p className="page-sub">لینک گوگل میت، زوم یا هر سرویس دیگری را ثبت کنید</p>
+            <p className="page-sub">اتاق جیتسی داخلی یا لینک گوگل میت / زوم</p>
           </div>
           <Link to="/meetings" className="btn-ghost">
             بازگشت
@@ -269,17 +336,31 @@ export default function MeetingsPage() {
             <span className="label">عنوان</span>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
           </label>
-          <label className="block">
-            <span className="label">لینک جلسه (Google Meet / Zoom / …)</span>
-            <input
-              className="input"
-              type="url"
-              dir="ltr"
-              placeholder="https://meet.google.com/..."
-              value={meetingUrl}
-              onChange={(e) => setMeetingUrl(e.target.value)}
-            />
-          </label>
+
+          {jitsiAvailable && (
+            <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <input
+                type="checkbox"
+                checked={useJitsi}
+                onChange={(e) => setUseJitsi(e.target.checked)}
+              />
+              ایجاد اتاق در جیتسی (خودمیزبان)
+            </label>
+          )}
+
+          {(!jitsiAvailable || !useJitsi) && (
+            <label className="block">
+              <span className="label">لینک خارجی (Google Meet / Zoom / …)</span>
+              <input
+                className="input"
+                type="url"
+                dir="ltr"
+                placeholder="https://meet.google.com/..."
+                value={meetingUrl}
+                onChange={(e) => setMeetingUrl(e.target.value)}
+              />
+            </label>
+          )}
           <label className="block">
             <span className="label">توضیحات</span>
             <textarea
@@ -428,6 +509,11 @@ export default function MeetingsPage() {
 
         <div className="panel space-y-3 p-5">
           <h2 className="text-sm font-bold">لینک جلسه</h2>
+          {detail.jitsiRoom && (
+            <div className="text-xs text-ink-mute">
+              جیتسی · اتاق <span dir="ltr">{detail.jitsiRoom}</span>
+            </div>
+          )}
           {isHost ? (
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
@@ -454,6 +540,11 @@ export default function MeetingsPage() {
           ) : (
             <p className="text-sm text-ink-mute">هنوز لینکی ثبت نشده است</p>
           )}
+          {isHost && jitsiAvailable && !detail.jitsiRoom && (
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => attachJitsi(detail.id)}>
+              اتصال به جیتسی
+            </button>
+          )}
         </div>
 
         <div className="panel p-5">
@@ -468,12 +559,29 @@ export default function MeetingsPage() {
           </div>
         </div>
 
+        <div className="panel p-5">
+          <h2 className="mb-3 text-sm font-bold">
+            آنلاین الان ({detail.online?.length || detail.liveParticipants || 0})
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {(detail.online || []).map((o) => (
+              <span key={o.userId} className="chip bg-emerald-500/15 text-emerald-800 dark:text-emerald-300">
+                {o.user.fullName}
+              </span>
+            ))}
+            {!detail.online?.length && (
+              <span className="text-sm text-ink-mute">کسی از طریق سامانه وارد نشده</span>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-wrap gap-2">
-          {detail.meetingUrl && detail.status !== 'CANCELLED' && detail.status !== 'ENDED' && (
+          {detail.status !== 'CANCELLED' && detail.status !== 'ENDED' && (detail.meetingUrl || jitsiAvailable) && (
             <button
               type="button"
               className="btn-primary"
-              onClick={() => openExternalMeeting(detail.meetingUrl)}
+              disabled={busy}
+              onClick={() => joinMeeting(detail.id)}
             >
               ورود به جلسه
             </button>
@@ -513,7 +621,11 @@ export default function MeetingsPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="page-title">جلسات</h1>
-          <p className="page-sub">تقویم و لینک گوگل میت / زوم و سایر سرویس‌ها</p>
+          <p className="page-sub">
+            {jitsiAvailable
+              ? 'جیتسی خودمیزبان + لینک خارجی · حضور آنلاین'
+              : 'لینک گوگل میت / زوم (جیتسی پیکربندی نشده)'}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to="/meetings?new=instant" className="btn-primary">
@@ -568,7 +680,7 @@ export default function MeetingsPage() {
           ))}
           {!upcoming.length && (
             <div className="panel p-6 text-center text-sm text-ink-mute md:col-span-2">
-              جلسه‌ای در پیش نیست — یک جلسه با لینک گوگل میت بسازید.
+              جلسه‌ای در پیش نیست — یک جلسه جیتسی یا با لینک خارجی بسازید.
             </div>
           )}
         </div>

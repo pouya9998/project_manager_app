@@ -11,7 +11,7 @@ Detailed install guide (Persian): **[INSTALL.md](./INSTALL.md)**
 - **Tasks** — assignees, priorities, attachments, comments with @mentions
 - **GitLab** — link projects, commits, and merge requests to tasks
 - **Chat** — groups & DMs, voice notes, images, polls, emoji, delivery/read receipts, task/project mentions
-- **Meetings** — Jalali calendar, invites, and external links (Google Meet / Zoom / …)
+- **Meetings** — Jalali calendar, self-hosted **Jitsi** rooms (Docker) or external Meet/Zoom links, online presence
 - **Notifications** — in-app bell + Web Push (installable PWA)
 - **Time tracking** — users log hours; admins approve / adjust / reject
 - **Branding** — app name, tagline, logo, primary color
@@ -50,6 +50,18 @@ docker compose ps
 docker compose logs -f backend
 docker compose down
 ```
+
+### Jitsi (video meetings)
+
+```bash
+mkdir -p jitsi/jitsi-cfg/{web,transcripts,prosody/config,prosody/prosody-plugins-custom,jicofo,jvb,jigasi,jibri}
+docker compose -f jitsi/docker-compose.yml --env-file jitsi/.env up -d
+```
+
+- Jitsi UI: http://localhost:8091
+- Set `JVB_ADVERTISE_IPS` in `jitsi/.env` to your LAN/public IP  
+- Backend `JITSI_PUBLIC_URL` must match `PUBLIC_URL` (see `docker-compose.yml`)  
+- Details: [jitsi/README.md](./jitsi/README.md)
 
 ## Local development
 

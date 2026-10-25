@@ -231,8 +231,9 @@ model User {
   lettersSent       Letter[]             @relation("LetterSender")
   letterReceipts    LetterRecipient[]
   letterTemplates   LetterTemplate[]
-  meetingsHosted  Meeting[]         @relation("MeetingHost")
-  meetingInvitees MeetingInvitee[]
+  meetingsHosted    Meeting[]            @relation("MeetingHost")
+  meetingInvitees   MeetingInvitee[]
+  meetingAttendance MeetingAttendance[]
 }
 
 model GitLabConfig {
@@ -744,8 +745,10 @@ model Meeting {
   id              Int               @id @default(autoincrement())
   title           String
   description     String?
-  /// External link (Google Meet, Zoom, …)
+  /// Join URL (Jitsi room or Google Meet / Zoom / …)
   meetingUrl      String?
+  /// Jitsi room name when hosted on our Jitsi stack
+  jitsiRoom       String?           @unique
   type            MeetingType       @default(SCHEDULED)
   status          MeetingStatus     @default(SCHEDULED)
   recurrence      MeetingRecurrence @default(NONE)
@@ -762,7 +765,8 @@ model Meeting {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  invitees MeetingInvitee[]
+  invitees   MeetingInvitee[]
+  attendance MeetingAttendance[]
 
   @@index([hostId, startsAt])
   @@index([status, startsAt])
@@ -780,4 +784,18 @@ model MeetingInvitee {
 
   @@unique([meetingId, userId])
   @@index([userId])
+}
+
+model MeetingAttendance {
+  id          Int       @id @default(autoincrement())
+  meeting     Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId   Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  joinedAt    DateTime  @default(now())
+  leftAt      DateTime?
+  durationSec Int       @default(0)
+
+  @@index([meetingId, userId])
+  @@index([userId, joinedAt])
 }

@@ -23,6 +23,11 @@ services:
       DATABASE_URL: postgresql://pmo:pmo@db:5432/pmo?schema=public
       JWT_SECRET: change-me-in-production-pmo-secret
       PORT: 3001
+      # Browser-facing Jitsi URL (must match jitsi/.env PUBLIC_URL)
+      JITSI_PUBLIC_URL: http://localhost:8091
+      # Optional JWT auth — also set ENABLE_AUTH=1 AUTH_TYPE=jwt in jitsi/.env
+      # JITSI_JWT_APP_ID: pmo
+      # JITSI_JWT_APP_SECRET: change-me-jitsi-jwt-secret
     volumes:
       - pmo_uploads:/app/uploads
     depends_on:
