@@ -1,9 +1,10 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache openssl
-COPY package.json ./
+# Copy lockfile so installs are reproducible (avoids ERESOLVE / @nestjs/common@undefined)
+COPY package.json package-lock.json ./
 COPY prisma ./prisma/
-RUN npm install --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000
+RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000
 COPY . .
 RUN npx prisma generate && npm run build \
   && npm prune --omit=dev \
