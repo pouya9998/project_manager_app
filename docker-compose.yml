@@ -19,8 +19,9 @@ services:
     build:
       context: ./backend
       args:
-        # npm only — Liara mirror (registry.npmjs.org often unreachable in IR)
+        # npm packages via Liara; Prisma binaries via npmmirror (not on npm registry)
         NPM_REGISTRY: https://package-mirror.liara.ir/repository/npm/
+        PRISMA_ENGINES_MIRROR: https://registry.npmmirror.com/-/binary/prisma
     container_name: pmo-backend
     restart: unless-stopped
     environment:

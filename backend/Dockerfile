@@ -4,6 +4,10 @@ RUN apk add --no-cache openssl
 # npm registry (compose sets Liara). Leave empty to use registry.npmjs.org.
 ARG NPM_REGISTRY=
 RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi
+# Prisma engines are NOT on the npm registry — they download from binaries.prisma.sh
+# (often blocked). npmmirror hosts the same engine files.
+ARG PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma
+ENV PRISMA_ENGINES_MIRROR=$PRISMA_ENGINES_MIRROR
 # Copy lockfile so installs are reproducible (avoids ERESOLVE / @nestjs/common@undefined)
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
@@ -16,6 +20,9 @@ RUN npx prisma generate && npm run build \
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Keep engines mirror for any runtime prisma CLI downloads
+ARG PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma
+ENV PRISMA_ENGINES_MIRROR=$PRISMA_ENGINES_MIRROR
 RUN apk add --no-cache openssl
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules

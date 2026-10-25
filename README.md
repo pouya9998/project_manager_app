@@ -33,7 +33,7 @@ docker compose up --build -d
 
 Open: **http://localhost:3080**
 
-Docker builds use **Liara’s npm mirror** (`package-mirror.liara.ir`) so `npm ci` works when `registry.npmjs.org` is unreachable.
+Docker builds use **Liara’s npm mirror** for packages and **npmmirror** for Prisma engine binaries (`binaries.prisma.sh` is often blocked).
 
 ### Default accounts
 
