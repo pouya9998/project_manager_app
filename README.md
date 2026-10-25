@@ -60,9 +60,9 @@ mkdir -p jitsi/jitsi-cfg/{web,transcripts,prosody/config,prosody/prosody-plugins
 docker compose -f jitsi/docker-compose.yml --env-file jitsi/.env up -d
 ```
 
-- Jitsi UI: http://localhost:8091
-- Set `JVB_ADVERTISE_IPS` in `jitsi/.env` to your LAN/public IP  
-- Backend `JITSI_PUBLIC_URL` must match `PUBLIC_URL` (see `docker-compose.yml`)  
+- Local UI: http://localhost:8091 (WebRTC works only on localhost or **HTTPS**)
+- Remote users need `https://meet.yourdomain.com` — plain `http://IP:8091` shows “WebRTC is not available”
+- Set `JVB_ADVERTISE_IPS` + matching `PUBLIC_URL` / `JITSI_PUBLIC_URL`
 - Details: [jitsi/README.md](./jitsi/README.md)
 
 ## Local development
