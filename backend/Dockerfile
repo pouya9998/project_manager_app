@@ -1,6 +1,10 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache openssl
+# Optional mirror when registry.npmjs.org is blocked, e.g.:
+#   docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_REGISTRY=
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi
 # Copy lockfile so installs are reproducible (avoids ERESOLVE / @nestjs/common@undefined)
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/

@@ -1,7 +1,11 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
+# Optional mirror when registry.npmjs.org is blocked, e.g.:
+#   docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_REGISTRY=
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi
 COPY package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY . .
 ARG VITE_API_URL=/api
 ARG VITE_UPLOADS_URL=/uploads
