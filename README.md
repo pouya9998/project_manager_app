@@ -33,6 +33,23 @@ docker compose up --build -d
 
 Open: **http://localhost:3080**
 
+If the server cannot reach `registry.npmjs.org`, builds already default to **Liara’s npm mirror**. Override if you prefer:
+
+```bash
+# Runflare npm mirror
+NPM_REGISTRY=https://mirror-npm.runflare.com docker compose build --no-cache
+docker compose up -d
+```
+
+Note: **ArvanCloud** mirrors Linux packages and Docker Hub (`docker.arvancloud.ir`), not the npm registry. For Docker pulls on the server you can set:
+
+```json
+// /etc/docker/daemon.json
+{ "registry-mirrors": ["https://docker.arvancloud.ir"] }
+```
+
+then `sudo systemctl restart docker`.
+
 ### Default accounts
 
 | Role | Email | Password |

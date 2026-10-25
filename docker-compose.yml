@@ -16,7 +16,14 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # ArvanCloud has Linux/Docker mirrors only — not npm.
+        # Use an Iranian npm registry (override if needed):
+        #   Liara:   https://package-mirror.liara.ir/repository/npm/
+        #   Runflare: https://mirror-npm.runflare.com
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://package-mirror.liara.ir/repository/npm/}
     container_name: pmo-backend
     restart: unless-stopped
     environment:
@@ -37,7 +44,10 @@ services:
       - "3001"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://package-mirror.liara.ir/repository/npm/}
     container_name: pmo-frontend
     restart: unless-stopped
     depends_on:
